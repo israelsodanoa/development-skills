@@ -1,0 +1,4 @@
+interface:
+  display_name: "Harness Development"
+  short_description: "Harnessed autonomous development workflows"
+  default_prompt: "Use $harness-development to bootstrap a reproducible agent harness for this repository."

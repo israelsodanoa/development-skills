@@ -1,0 +1,28 @@
+services:
+  sonarqube:
+    image: sonarqube:community
+    ports:
+      - "9000:9000"
+    environment:
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    volumes:
+      - sonar_data:/opt/sonarqube/data
+      - sonar_extensions:/opt/sonarqube/extensions
+      - sonar_logs:/opt/sonarqube/logs
+
+  sonar-scanner:
+    image: sonarsource/sonar-scanner-cli:latest
+    depends_on:
+      - sonarqube
+    environment:
+      SONAR_HOST_URL: "${SONAR_HOST_URL:-http://sonarqube:9000}"
+      SONAR_TOKEN: "${SONAR_TOKEN:?Set SONAR_TOKEN before running the scanner}"
+    volumes:
+      - ../..:/usr/src
+    working_dir: /usr/src
+    command: sonar-scanner -Dproject.settings=.harness/sonar/sonar-project.properties
+
+volumes:
+  sonar_data:
+  sonar_extensions:
+  sonar_logs:

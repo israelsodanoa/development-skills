@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "commands": [
+    {
+      "id": "harness.sonar.generate",
+      "command": "python3 \"$HARNESS_SKILL_SCRIPTS/sonar_engine.py\" generate --target \"$HARNESS_TARGET\"",
+      "workdir": ".",
+      "purpose": "Generate Docker-based Sonar templates for the detected target project stack.",
+      "when_to_run": "After bootstrapping the harness or when the project stack changes.",
+      "expected_runtime": "short",
+      "risk": "safe",
+      "approval_required": false,
+      "required_before_completion": false,
+      "success_signal": "exit code 0",
+      "failure_protocol": "Record a control gap and inspect stack detection output."
+    },
+    {
+      "id": "quality.sonar.run",
+      "command": "python3 \"$HARNESS_SKILL_SCRIPTS/sonar_engine.py\" run --target \"$HARNESS_TARGET\" --request-id \"$HARNESS_REQUEST_ID\" --approved",
+      "workdir": ".",
+      "purpose": "Run the Docker-based Sonar workflow and capture quality evidence.",
+      "when_to_run": "Before completion for changes that require Sonar quality evidence.",
+      "expected_runtime": "long",
+      "risk": "approval-required",
+      "approval_required": true,
+      "required_before_completion": false,
+      "success_signal": "exit code 0 and Sonar scanner success",
+      "failure_protocol": "Run failure attribution before repair or waiver."
+    }
+  ]
+}
