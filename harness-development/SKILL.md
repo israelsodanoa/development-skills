@@ -59,9 +59,9 @@ Optimal usage:
 python3 scripts/init_project_harness.py --target /path/to/project
 ```
 
-Use this first for any repository that does not already have `.harness/`. Use `--force` only when intentionally replacing scaffold-managed templates. Use `--skip-sonar` when the project should not receive Sonar templates yet.
+Use this first for any repository that does not already have `.harness/`. By default, init configures Docker-based SonarQube, starts the `sonarqube` service, and waits until `/api/system/status` reports `UP`. Use `--force` only when intentionally replacing scaffold-managed templates. Use `--skip-sonar` only when the project should bypass SonarQube startup and record Sonar as skipped.
 
-Outputs: `.harness/config/`, `.harness/memory/`, `.harness/sonar/`, `.harness/requests/`, `.harness/reports/`. It also records the skill `scripts/` path in `.harness/config/harness.json`.
+Outputs: `.harness/config/`, `.harness/memory/`, `.harness/sonar/`, `.harness/requests/`, `.harness/reports/`. It also records the skill `scripts/` path in `.harness/config/harness.json` and Sonar runtime status in `.harness/sonar/sonar-config.json`.
 
 ### `request_engine.py`
 
@@ -138,7 +138,7 @@ python3 scripts/harness_state.py transition --target /path/to/project --request-
 python3 scripts/harness_state.py transition --target /path/to/project --request-id <request_id> --to IMPLEMENT
 ```
 
-Use it whenever moving through `SPECIFY -> PLAN -> TASKS -> IMPLEMENT -> VERIFY -> CLOSEOUT`. It blocks skipped phases and blocks gated phases when the prior artifact is missing, invalid, or unapproved.
+Use it whenever moving through `SPECIFY -> PLAN -> TASKS -> IMPLEMENT -> VERIFY -> CLOSEOUT`. It blocks skipped phases, gated phases when the prior artifact is missing, invalid, or unapproved, and closeout when registry commands marked `required_before_completion` have not succeeded.
 
 Outputs: updated `state.json` and `state.transition` history events.
 
@@ -186,25 +186,28 @@ python3 scripts/command_engine.py run --target /path/to/project --request-id <re
 python3 scripts/command_engine.py run --target /path/to/project --request-id <request_id> --id quality.sonar.run --approved
 ```
 
-Use registered commands instead of guessed shell commands whenever possible. Pass `--approved` only after approval-required command execution has been approved and recorded.
+Use registered commands instead of guessed shell commands whenever possible. Pass `--approved` only after approval-required command execution has been approved and recorded. Run `quality.sonar.run` through this engine before closeout so the required command evidence is written to request state.
 
 Outputs: command evidence logs under `.harness/requests/<request_id>/evidence/commands/`, `commands_run` state entries, and command history events.
 
 ### `sonar_engine.py`
 
-Detect the target stack, generate Docker-based Sonar templates, and run approved Sonar workflows.
+Detect the target stack, configure Docker-based SonarQube, manage the local SonarQube runtime, and run approved Sonar scans.
 
 Optimal usage:
 
 ```bash
 python3 scripts/sonar_engine.py detect --target /path/to/project
-python3 scripts/sonar_engine.py generate --target /path/to/project
+python3 scripts/sonar_engine.py configure --target /path/to/project
+python3 scripts/sonar_engine.py up --target /path/to/project --approved
+python3 scripts/sonar_engine.py status --target /path/to/project
 python3 scripts/sonar_engine.py run --target /path/to/project --request-id <request_id> --approved
+python3 scripts/sonar_engine.py down --target /path/to/project --approved
 ```
 
-Use `detect` or `generate` during bootstrap and whenever the project stack changes. Use `run` only when Docker execution is approved, Docker is available, and the required Sonar environment variables are set. Store credentials only in environment variables.
+Use `configure` during bootstrap and whenever the project stack changes. Use `up` to start SonarQube and wait for the system API to report `UP`; `init_project_harness.py` does this by default. Use `status` before scans or after runtime changes. Use `run` for a self-contained local scan: it configures missing Sonar files, starts the local Docker service if needed, uses default local admin credentials to bootstrap anonymous local scan permissions and the project when needed, and runs the scanner with quality-gate waiting enabled. Do not create or export `SONAR_TOKEN`; the local Docker server disables forced authentication for anonymous local analysis and stores no scanner credentials.
 
-Outputs: `.harness/sonar/docker-compose.sonar.yml`, `.harness/sonar/sonar-project.properties`, optional Sonar evidence logs, and quality history events.
+Outputs: `.harness/sonar/docker-compose.sonar.yml`, `.harness/sonar/sonar-project.properties`, `.harness/sonar/.env.example`, `.harness/sonar/sonar-config.json`, optional Sonar evidence logs, and quality history events.
 
 ### `prompt_engine.py`
 

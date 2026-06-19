@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "status": "configured_not_run",
+  "detected_stack": {
+    "primary": "generic",
+    "detected": ["generic"],
+    "evidence": {
+      "generic": ["scaffold placeholder"]
+    }
+  },
+  "project": {
+    "project_key": "generic-project",
+    "project_name": "Generic Project"
+  },
+  "urls": {
+    "host": "http://localhost:9000",
+    "internal": "http://sonarqube:9000",
+    "system_status": "http://localhost:9000/api/system/status"
+  },
+  "docker": {
+    "compose_file": ".harness/sonar/docker-compose.sonar.yml",
+    "services": {
+      "server": "sonarqube",
+      "scanner": "sonar-scanner"
+    },
+    "compose_project": "harness-sonar-generic-project",
+    "host_port": 9000
+  },
+  "files": {
+    "properties": ".harness/sonar/sonar-project.properties",
+    "env_example": ".harness/sonar/.env.example"
+  },
+  "required_environment": [],
+  "scanner_authentication": "local_anonymous",
+  "quality_gate": {
+    "wait": true,
+    "timeout_seconds": 300
+  },
+  "last_error": "",
+  "updated_at": ""
+}

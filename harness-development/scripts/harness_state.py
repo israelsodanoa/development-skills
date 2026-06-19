@@ -11,6 +11,7 @@ from harness_common import (
     PHASES,
     HarnessError,
     append_history,
+    load_registry,
     load_state,
     main_guard,
     print_json,
@@ -20,6 +21,21 @@ from harness_common import (
     validate_tasks,
     verification_path,
 )
+
+
+def missing_required_commands(target: str, state: dict) -> list[str]:
+    registry = load_registry(target)
+    required = [
+        command["id"]
+        for command in registry.get("commands", [])
+        if command.get("required_before_completion")
+    ]
+    successful = {
+        command.get("command_id")
+        for command in state.get("commands_run", [])
+        if command.get("returncode") == 0
+    }
+    return [command_id for command_id in required if command_id not in successful]
 
 
 def approve(args: argparse.Namespace) -> None:
@@ -52,6 +68,10 @@ def transition(args: argparse.Namespace) -> None:
         raise HarnessError("Cannot enter IMPLEMENT; tasks.md is invalid")
     if target_phase == "CLOSEOUT" and not verification_path(args.target, args.request_id).exists():
         raise HarnessError("Cannot close out without verification-report.md")
+    if target_phase == "CLOSEOUT":
+        missing_commands = missing_required_commands(args.target, state)
+        if missing_commands:
+            raise HarnessError(f"Cannot close out; required commands have not succeeded: {', '.join(missing_commands)}")
     state["phase"] = target_phase
     state["status"] = args.status or target_phase.lower()
     state["next_action"] = args.next_action or state.get("next_action", "")

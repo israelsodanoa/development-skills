@@ -16,6 +16,8 @@ Required layout:
   sonar/
     docker-compose.sonar.yml
     sonar-project.properties
+    .env.example
+    sonar-config.json
   requests/
     <request_id>/
       spec.md
@@ -36,5 +38,6 @@ Rules:
 - Treat `.harness/requests/<request_id>/` as the source of truth for implementation work.
 - Do not overwrite request history, handoffs, evidence, reports, or user-edited memory unless `--force` is explicitly passed.
 - Scaffold updates are additive by default.
-- Store secrets only as environment-variable names or redacted references.
+- Keep the local Sonar scaffold token-free; no `SONAR_TOKEN` is required for Docker-local scans.
+- Store other secrets only as environment-variable names or redacted references.
 - Record the skill engine path in `.harness/config/harness.json` so generated commands can locate the shared engine.

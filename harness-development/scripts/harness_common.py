@@ -5,12 +5,16 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -288,14 +292,32 @@ def choose_primary_stack(detected: list[str]) -> str:
     return detected[0] if detected else "generic"
 
 
-def sonar_properties(target: str | Path, stack: dict[str, Any]) -> str:
+def sonar_project_identity(target: str | Path, project_key: str | None = None, project_name: str | None = None) -> dict[str, str]:
     root = target_root(target)
-    project_name = root.name
-    key = re.sub(r"[^A-Za-z0-9_.:-]+", "-", project_name).strip("-") or "project"
+    name = project_name or root.name
+    key_source = project_key or name
+    key = re.sub(r"[^A-Za-z0-9_.:-]+", "-", key_source).strip("-") or "project"
+    return {"project_key": key, "project_name": name}
+
+
+def sonar_compose_project_name(target: str | Path) -> str:
+    root = target_root(target)
+    slug = re.sub(r"[^a-z0-9]+", "-", root.name.lower()).strip("-") or "project"
+    digest = hashlib.sha1(str(root).encode("utf-8")).hexdigest()[:8]
+    return f"harness-sonar-{slug[:32]}-{digest}"
+
+
+def sonar_properties(
+    target: str | Path,
+    stack: dict[str, Any],
+    project_key: str | None = None,
+    project_name: str | None = None,
+) -> str:
+    identity = sonar_project_identity(target, project_key=project_key, project_name=project_name)
     primary = stack["primary"]
     lines = [
-        f"sonar.projectKey={key}",
-        f"sonar.projectName={project_name}",
+        f"sonar.projectKey={identity['project_key']}",
+        f"sonar.projectName={identity['project_name']}",
         "sonar.sourceEncoding=UTF-8",
     ]
     if primary in {"node", "typescript"}:
@@ -342,14 +364,15 @@ def sonar_properties(target: str | Path, stack: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def sonar_compose() -> str:
-    return """services:
+def sonar_compose(host_port: int = 9000) -> str:
+    return f"""services:
   sonarqube:
     image: sonarqube:community
     ports:
-      - "9000:9000"
+      - "{host_port}:9000"
     environment:
       SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+      SONAR_FORCEAUTHENTICATION: "false"
     volumes:
       - sonar_data:/opt/sonarqube/data
       - sonar_extensions:/opt/sonarqube/extensions
@@ -360,18 +383,138 @@ def sonar_compose() -> str:
     depends_on:
       - sonarqube
     environment:
-      SONAR_HOST_URL: "${SONAR_HOST_URL:-http://sonarqube:9000}"
-      SONAR_TOKEN: "${SONAR_TOKEN:?Set SONAR_TOKEN before running the scanner}"
+      SONAR_HOST_URL: "http://sonarqube:9000"
     volumes:
       - ../..:/usr/src
     working_dir: /usr/src
-    command: sonar-scanner -Dproject.settings=.harness/sonar/sonar-project.properties
+    command: sonar-scanner -Dproject.settings=.harness/sonar/sonar-project.properties -Dsonar.qualitygate.wait=true
 
 volumes:
   sonar_data:
   sonar_extensions:
   sonar_logs:
 """
+
+
+def sonar_env_example(host_port: int = 9000) -> str:
+    return f"""# No environment variables are required for local Sonar scans.
+# The SonarQube UI is exposed at http://localhost:{host_port}.
+# Keep this file token-free; credentials do not belong in .harness.
+"""
+
+
+def sonar_config_data(
+    target: str | Path,
+    stack: dict[str, Any],
+    host_port: int = 9000,
+    project_key: str | None = None,
+    project_name: str | None = None,
+    status: str = "configured_not_run",
+    last_error: str = "",
+) -> dict[str, Any]:
+    root = target_root(target)
+    identity = sonar_project_identity(root, project_key=project_key, project_name=project_name)
+    sonar_root = harness_dir(root) / "sonar"
+    return {
+        "schema_version": 1,
+        "status": status,
+        "detected_stack": stack,
+        "project": identity,
+        "urls": {
+            "host": f"http://localhost:{host_port}",
+            "internal": "http://sonarqube:9000",
+            "system_status": f"http://localhost:{host_port}/api/system/status",
+        },
+        "docker": {
+            "compose_file": str(sonar_root / "docker-compose.sonar.yml"),
+            "services": {
+                "server": "sonarqube",
+                "scanner": "sonar-scanner",
+            },
+            "compose_project": sonar_compose_project_name(root),
+            "host_port": host_port,
+        },
+        "files": {
+            "properties": str(sonar_root / "sonar-project.properties"),
+            "env_example": str(sonar_root / ".env.example"),
+        },
+        "required_environment": [],
+        "scanner_authentication": "local_anonymous",
+        "quality_gate": {
+            "wait": True,
+            "timeout_seconds": 300,
+        },
+        "last_error": last_error,
+        "updated_at": now_iso(),
+    }
+
+
+def sonar_config_path(target: str | Path) -> Path:
+    return harness_dir(target) / "sonar" / "sonar-config.json"
+
+
+def read_sonar_config(target: str | Path) -> dict[str, Any]:
+    return load_json(sonar_config_path(target), default={})
+
+
+def write_sonar_config(target: str | Path, data: dict[str, Any]) -> None:
+    data["updated_at"] = now_iso()
+    write_json(sonar_config_path(target), data)
+
+
+def docker_available() -> bool:
+    return shutil.which("docker") is not None
+
+
+def require_docker_compose(target: str | Path) -> None:
+    if not docker_available():
+        raise HarnessError("Docker CLI not found; install Docker before running SonarQube")
+    result = run_shell("docker compose version", target_root(target))
+    if result.returncode != 0:
+        raise HarnessError(f"Docker Compose is not available: {result.stderr.strip() or result.stdout.strip()}")
+
+
+def sonar_status_url(target: str | Path) -> str:
+    config = read_sonar_config(target)
+    return config.get("urls", {}).get("system_status") or "http://localhost:9000/api/system/status"
+
+
+def fetch_sonar_status(target: str | Path, timeout: int = 5) -> dict[str, Any]:
+    url = sonar_status_url(target)
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            body = response.read().decode("utf-8")
+            data = json.loads(body)
+            return {"ok": data.get("status") == "UP", "status": data.get("status", "unknown"), "url": url, "body": data}
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        return {"ok": False, "status": "unreachable", "url": url, "error": str(exc)}
+
+
+def wait_for_sonar(target: str | Path, timeout_seconds: int = 180, interval_seconds: int = 5) -> dict[str, Any]:
+    deadline = time.monotonic() + timeout_seconds
+    last = {"ok": False, "status": "not_checked"}
+    while time.monotonic() < deadline:
+        last = fetch_sonar_status(target, timeout=min(interval_seconds, 5))
+        if last.get("ok"):
+            return last
+        time.sleep(interval_seconds)
+    return last
+
+
+def update_sonar_runtime_status(target: str | Path, status: str, last_error: str = "", extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    data = read_sonar_config(target)
+    if not data:
+        stack = detect_stack(target)
+        data = sonar_config_data(target, stack, status=status, last_error=last_error)
+    data["status"] = status
+    data["last_error"] = last_error
+    data["required_environment"] = []
+    data["scanner_authentication"] = "local_anonymous"
+    data.setdefault("quality_gate", {"wait": True, "timeout_seconds": 300})
+    if extra:
+        data.update(extra)
+    write_sonar_config(target, data)
+    return data
 
 
 def scaffold_source() -> Path:
@@ -427,12 +570,84 @@ def update_harness_config(target: str | Path) -> dict[str, Any]:
     return data
 
 
-def generate_sonar_templates(target: str | Path, force: bool = False) -> dict[str, Any]:
+def generate_sonar_templates(
+    target: str | Path,
+    force: bool = False,
+    host_port: int = 9000,
+    project_key: str | None = None,
+    project_name: str | None = None,
+) -> dict[str, Any]:
     root = harness_dir(target) / "sonar"
     stack = detect_stack(target)
-    compose_written = write_if_absent(root / "docker-compose.sonar.yml", sonar_compose(), force=force)
-    props_written = write_if_absent(root / "sonar-project.properties", sonar_properties(target, stack), force=force)
-    return {"stack": stack, "compose_written": compose_written, "properties_written": props_written}
+    compose_written = write_if_absent(root / "docker-compose.sonar.yml", sonar_compose(host_port=host_port), force=force)
+    props_written = write_if_absent(
+        root / "sonar-project.properties",
+        sonar_properties(target, stack, project_key=project_key, project_name=project_name),
+        force=force,
+    )
+    env_written = write_if_absent(root / ".env.example", sonar_env_example(host_port=host_port), force=force)
+    config = sonar_config_data(
+        target,
+        stack,
+        host_port=host_port,
+        project_key=project_key,
+        project_name=project_name,
+        status="configured_not_run",
+    )
+    write_sonar_config(target, config)
+    return {
+        "stack": stack,
+        "compose_written": compose_written,
+        "properties_written": props_written,
+        "env_written": env_written,
+        "config": config,
+    }
+
+
+def start_sonarqube(target: str | Path, timeout_seconds: int = 180) -> dict[str, Any]:
+    root = target_root(target)
+    require_docker_compose(root)
+    compose = harness_dir(root) / "sonar" / "docker-compose.sonar.yml"
+    if not compose.exists():
+        raise HarnessError(f"Missing Sonar compose file: {compose}")
+    command = f'docker compose -p "{sonar_compose_project_name(root)}" -f "{compose}" up -d sonarqube'
+    result = run_shell(command, root)
+    payload = {
+        "command": command,
+        "returncode": result.returncode,
+        "stdout": result.stdout.strip(),
+        "stderr": result.stderr.strip(),
+    }
+    if result.returncode != 0:
+        update_sonar_runtime_status(root, "failed", last_error=result.stderr.strip() or result.stdout.strip(), extra={"last_start": payload})
+        raise HarnessError(f"Failed to start SonarQube: {result.stderr.strip() or result.stdout.strip()}")
+    status = wait_for_sonar(root, timeout_seconds=timeout_seconds)
+    if not status.get("ok"):
+        update_sonar_runtime_status(root, "failed", last_error=f"SonarQube did not become healthy: {status}", extra={"last_start": payload, "last_health": status})
+        raise HarnessError(f"SonarQube did not become healthy before timeout: {status}")
+    config = update_sonar_runtime_status(root, "running", extra={"last_start": payload, "last_health": status})
+    return {"ok": True, "start": payload, "health": status, "config": config}
+
+
+def stop_sonarqube(target: str | Path) -> dict[str, Any]:
+    root = target_root(target)
+    require_docker_compose(root)
+    compose = harness_dir(root) / "sonar" / "docker-compose.sonar.yml"
+    if not compose.exists():
+        raise HarnessError(f"Missing Sonar compose file: {compose}")
+    command = f'docker compose -p "{sonar_compose_project_name(root)}" -f "{compose}" down'
+    result = run_shell(command, root)
+    payload = {
+        "command": command,
+        "returncode": result.returncode,
+        "stdout": result.stdout.strip(),
+        "stderr": result.stderr.strip(),
+    }
+    if result.returncode != 0:
+        update_sonar_runtime_status(root, "stop_failed", last_error=result.stderr.strip() or result.stdout.strip(), extra={"last_stop": payload})
+        raise HarnessError(f"Failed to stop SonarQube: {result.stderr.strip() or result.stdout.strip()}")
+    config = update_sonar_runtime_status(root, "stopped", extra={"last_stop": payload})
+    return {"ok": True, "stop": payload, "config": config}
 
 
 def parse_json_arg(value: str | None) -> Any:
@@ -508,4 +723,3 @@ def main_guard(fn: Any) -> None:
         fn()
     except HarnessError as exc:
         fail(str(exc))
-
