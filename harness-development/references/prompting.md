@@ -6,8 +6,8 @@ Required phases:
 
 - `intake`: interview the user before planning and persist answers, waivers, assumptions, and blocking questions in `intake.md` and `state.json`.
 - `specify`: derive objective, assumptions, success criteria, boundaries, risk, and open questions.
-- `plan`: produce ordered implementation strategy and verification checkpoints.
-- `tasks`: break the approved plan into small tasks with acceptance and verification.
+- `plan`: produce a research-backed plan with WBS decomposition, dependency graph, implementation slices, ADR/RAPID decision records, verification matrix, premortem risks, Cynefin complexity classification, sequencing rationale, parallelization boundaries, risks, and open questions.
+- `tasks`: break the approved plan into atomic XS/S tasks with exact scope, non-scope, acceptance, Given/When/Then scenario when applicable, verification command/evidence, dependencies, likely files, risk notes, rollback/repair, and parallelization label.
 - `implement`: execute one task at a time using selected context and permitted tools.
 - `failure`: attribute failed checks before repair.
 - `review`: inspect diff, evidence coverage, architecture, tests, and risk.
@@ -18,3 +18,5 @@ Required phases:
 Every prompt packet should name the request ID, current phase, objective, relevant artifact paths, required output, and gating rule.
 
 The intake prompt asks a common first batch covering objective, task type, audience, desired outcome, success criteria, non-goals, constraints, permissions, and verification expectations. It then asks type-specific follow-ups for feature, bug, refactor, UI/runtime, security/reliability, review, maintenance, or harness-improvement work, plus risk follow-ups for migrations, external systems, credentials, destructive actions, production impact, or ambiguous product behavior. Do not approve `spec.md` or enter PLAN until intake is complete.
+
+The plan prompt must require WBS, INVEST, SMART, ADR, RAPID, Cynefin, Gherkin, and premortem framework coverage. The tasks prompt must require lowest-practical decomposition and reject placeholder, M/L/XL, multi-subsystem, or vague tasks before approval.

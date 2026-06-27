@@ -1,0 +1,24 @@
+{"timestamp": "2026-06-27T19:37:14+00:00", "type": "request.created", "summary": "Created request 20260627-193714-planning-quality-gates", "objective": "Upgrade planning and task breakdown into strict research-backed quality gates with detailed templates, validation, prompt support, docs, and tests."}
+{"timestamp": "2026-06-27T19:37:14+00:00", "type": "intake.created", "summary": "Intake artifact checked"}
+{"timestamp": "2026-06-27T19:37:29+00:00", "type": "intake.recorded", "summary": "Recorded intake field objective", "field": "objective"}
+{"timestamp": "2026-06-27T19:37:29+00:00", "type": "intake.recorded", "summary": "Recorded intake field task_type", "field": "task_type"}
+{"timestamp": "2026-06-27T19:37:29+00:00", "type": "intake.recorded", "summary": "Recorded intake field audience", "field": "audience"}
+{"timestamp": "2026-06-27T19:37:29+00:00", "type": "intake.recorded", "summary": "Recorded intake field desired_outcome", "field": "desired_outcome"}
+{"timestamp": "2026-06-27T19:37:29+00:00", "type": "intake.recorded", "summary": "Recorded intake field success_criteria", "field": "success_criteria"}
+{"timestamp": "2026-06-27T19:37:29+00:00", "type": "intake.recorded", "summary": "Recorded intake field non_goals", "field": "non_goals"}
+{"timestamp": "2026-06-27T19:37:29+00:00", "type": "intake.recorded", "summary": "Recorded intake field constraints", "field": "constraints"}
+{"timestamp": "2026-06-27T19:37:29+00:00", "type": "intake.recorded", "summary": "Recorded intake field permissions", "field": "permissions"}
+{"timestamp": "2026-06-27T19:37:29+00:00", "type": "intake.recorded", "summary": "Recorded intake field verification_expectations", "field": "verification_expectations"}
+{"timestamp": "2026-06-27T19:37:29+00:00", "type": "intake.completed", "summary": "Completed intake interview"}
+{"timestamp": "2026-06-27T19:37:43+00:00", "type": "spec.created", "summary": "Spec artifact checked"}
+{"timestamp": "2026-06-27T19:37:43+00:00", "type": "approval.recorded", "summary": "Approved spec gate", "artifact": "spec.md"}
+{"timestamp": "2026-06-27T19:37:43+00:00", "type": "state.transition", "summary": "SPECIFY -> PLAN", "status": "plan"}
+{"timestamp": "2026-06-27T19:42:30+00:00", "type": "plan.created", "summary": "Plan artifact checked"}
+{"timestamp": "2026-06-27T19:42:30+00:00", "type": "approval.recorded", "summary": "Approved plan gate", "artifact": "plan.md"}
+{"timestamp": "2026-06-27T19:42:30+00:00", "type": "state.transition", "summary": "PLAN -> TASKS", "status": "tasks"}
+{"timestamp": "2026-06-27T19:42:30+00:00", "type": "tasks.created", "summary": "Tasks artifact checked"}
+{"timestamp": "2026-06-27T19:43:01+00:00", "type": "approval.recorded", "summary": "Approved tasks gate", "artifact": "tasks.md"}
+{"timestamp": "2026-06-27T19:43:01+00:00", "type": "state.transition", "summary": "TASKS -> IMPLEMENT", "status": "implement"}
+{"timestamp": "2026-06-27T19:43:16+00:00", "type": "command.succeeded", "summary": "Ran python3 -m unittest discover tests successfully after implementation."}
+{"timestamp": "2026-06-27T19:43:16+00:00", "type": "command.succeeded", "summary": "Ran python3 -m compileall scripts successfully after implementation."}
+{"timestamp": "2026-06-27T19:43:16+00:00", "type": "decision", "summary": "Did not run approval-required Docker Sonar scan; requested verification commands passed and Sonar remains a residual closeout requirement."}

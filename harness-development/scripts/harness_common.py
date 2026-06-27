@@ -37,13 +37,57 @@ SPEC_SECTIONS = [
 
 PLAN_SECTIONS = [
     "Overview",
+    "Planning Standard",
+    "Decomposition Map",
+    "Dependency Graph",
     "Implementation Strategy",
+    "Implementation Slices",
+    "Decision Records",
     "Verification Strategy",
+    "Verification Matrix",
+    "Premortem Risks",
+    "Complexity Classification",
+    "Sequencing Rationale",
+    "Parallelization Boundaries",
     "Risks",
     "Open Questions",
 ]
 
 TASKS_MARKERS = ["Task:", "Acceptance:", "Verify:", "Dependencies:", "Files:"]
+
+PLANNING_FRAMEWORK_IDS = ["wbs", "invest", "smart", "adr", "rapid", "cynefin", "gherkin", "premortem"]
+
+TASK_REQUIRED_FIELDS = [
+    "Task",
+    "Outcome",
+    "Exact Scope",
+    "Non-Scope",
+    "Size",
+    "Acceptance",
+    "Scenario",
+    "Verify",
+    "Dependencies",
+    "Files",
+    "Risk Notes",
+    "Rollback/Repair",
+    "Parallelization",
+]
+
+ALLOWED_TASK_SIZES = {"XS", "S"}
+
+PLACEHOLDER_PATTERNS = [
+    r"\bplaceholder\b",
+    r"\breplace\b",
+    r"\btbd\b",
+    r"\btodo\b",
+    r"\bto be filled\b",
+    r"\bto be defined\b",
+    r"\bto be discovered\b",
+    r"\bidentify likely\b",
+    r"\bfill in\b",
+    r"\?\?\?",
+    r"\[[A-Za-z][^\]\n]+\]",
+]
 
 INTAKE_TASK_TYPES = [
     "feature",
@@ -236,6 +280,7 @@ def default_state(request_id: str, objective: str) -> dict[str, Any]:
         "failure_attributions": [],
         "interventions": [],
         "intake": default_intake(),
+        "planning_quality": default_planning_quality(),
         "next_action": "Run intake interview and complete intake before spec approval.",
         "created_at": stamp,
         "updated_at": stamp,
@@ -274,6 +319,29 @@ def _unique_strings(values: Iterable[Any]) -> list[str]:
             result.append(text)
             seen.add(text)
     return result
+
+
+def default_planning_quality() -> dict[str, Any]:
+    return {
+        "plan": {"status": "unchecked", "frameworks": [], "validated_at": ""},
+        "tasks": {"status": "unchecked", "minimum_size": "XS/S", "validated_at": "", "task_count": 0},
+    }
+
+
+def ensure_planning_quality_state(state: dict[str, Any]) -> dict[str, Any]:
+    quality = state.get("planning_quality")
+    if not isinstance(quality, dict):
+        quality = {}
+    default = default_planning_quality()
+    for key, value in default.items():
+        existing = quality.get(key)
+        if not isinstance(existing, dict):
+            quality[key] = dict(value)
+            continue
+        for subkey, subvalue in value.items():
+            existing.setdefault(subkey, subvalue)
+    state["planning_quality"] = quality
+    return quality
 
 
 def ensure_intake_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -405,20 +473,174 @@ def require_sections(markdown_path: Path, sections: Iterable[str]) -> list[str]:
     return missing
 
 
+def markdown_section_map(markdown_path: Path, level: int = 2) -> dict[str, str]:
+    if not markdown_path.exists():
+        raise HarnessError(f"Missing artifact: {markdown_path}")
+    text = markdown_path.read_text(encoding="utf-8")
+    pattern = re.compile(rf"^{'#' * level}\s+(.+?)\s*$", flags=re.MULTILINE)
+    matches = list(pattern.finditer(text))
+    sections: dict[str, str] = {}
+    for index, match in enumerate(matches):
+        title = match.group(1).strip()
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        sections[title] = text[start:end].strip()
+    return sections
+
+
+def _plain_content(value: str) -> str:
+    lines = []
+    for line in value.splitlines():
+        text = line.strip()
+        text = re.sub(r"^[-*]\s+", "", text)
+        text = re.sub(r"^\d+[.)]\s+", "", text)
+        text = text.strip()
+        if text:
+            lines.append(text)
+    return "\n".join(lines)
+
+
+def _has_placeholder(value: str) -> bool:
+    lowered = value.lower()
+    return any(re.search(pattern, lowered) for pattern in PLACEHOLDER_PATTERNS)
+
+
+def validate_plan_artifact(target: str | Path, request_id: str) -> dict[str, Any]:
+    path = plan_path(target, request_id)
+    missing_sections = require_sections(path, PLAN_SECTIONS)
+    sections = markdown_section_map(path)
+    quality_problems: list[str] = []
+
+    for section in PLAN_SECTIONS:
+        if section in {"Open Questions"} or section in missing_sections:
+            continue
+        content = _plain_content(sections.get(section, ""))
+        if len(content) < 20:
+            quality_problems.append(f"{section}: section must contain concrete planning detail")
+        elif _has_placeholder(content):
+            quality_problems.append(f"{section}: section contains placeholder text")
+
+    planning_standard = sections.get("Planning Standard", "").lower()
+    frameworks = [framework for framework in PLANNING_FRAMEWORK_IDS if framework in planning_standard]
+    missing_frameworks = [framework for framework in PLANNING_FRAMEWORK_IDS if framework not in frameworks]
+    if missing_frameworks:
+        quality_problems.append("Planning Standard: missing framework ids: " + ", ".join(missing_frameworks))
+
+    dependency_graph = sections.get("Dependency Graph", "").lower()
+    if dependency_graph and not any(marker in dependency_graph for marker in ["->", "depends on", "before", "after"]):
+        quality_problems.append("Dependency Graph: must state ordering or dependency relationships")
+
+    decisions = sections.get("Decision Records", "").lower()
+    for marker in ["decision:", "rationale:", "consequences:"]:
+        if decisions and marker not in decisions:
+            quality_problems.append(f"Decision Records: missing {marker}")
+
+    verification = sections.get("Verification Matrix", "").lower()
+    if verification and not all(marker in verification for marker in ["criteria", "evidence", "command"]):
+        quality_problems.append("Verification Matrix: must map criteria to evidence and command")
+
+    premortem = sections.get("Premortem Risks", "").lower()
+    if premortem and not all(marker in premortem for marker in ["failure mode", "mitigation"]):
+        quality_problems.append("Premortem Risks: must include failure mode and mitigation")
+
+    complexity = sections.get("Complexity Classification", "").lower()
+    if complexity and not any(domain in complexity for domain in ["clear", "complicated", "complex", "chaotic"]):
+        quality_problems.append("Complexity Classification: must include a Cynefin domain")
+
+    parallelization = sections.get("Parallelization Boundaries", "").lower()
+    if parallelization and not all(marker in parallelization for marker in ["parallel", "sequential"]):
+        quality_problems.append("Parallelization Boundaries: must distinguish parallel and sequential work")
+
+    return {
+        "missing_sections": missing_sections,
+        "quality_problems": quality_problems,
+        "frameworks": frameworks,
+    }
+
+
 def validate_spec(target: str | Path, request_id: str) -> list[str]:
     return require_sections(spec_path(target, request_id), SPEC_SECTIONS)
 
 
 def validate_plan(target: str | Path, request_id: str) -> list[str]:
-    return require_sections(plan_path(target, request_id), PLAN_SECTIONS)
+    result = validate_plan_artifact(target, request_id)
+    return [f"missing section: {item}" for item in result["missing_sections"]] + list(result["quality_problems"])
 
 
-def validate_tasks(target: str | Path, request_id: str) -> list[str]:
+def task_blocks(text: str) -> list[dict[str, str]]:
+    pattern = re.compile(r"^##\s+Task\s+(.+?)\s*$", flags=re.MULTILINE)
+    matches = list(pattern.finditer(text))
+    blocks: list[dict[str, str]] = []
+    for index, match in enumerate(matches):
+        start = match.end()
+        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+        blocks.append({"title": match.group(1).strip(), "content": text[start:end].strip()})
+    return blocks
+
+
+def task_field_value(block: str, field: str) -> str:
+    pattern = re.compile(rf"^\s*(?:[-*]\s*)?(?:\*\*)?{re.escape(field)}(?:\*\*)?\s*:\s*(.*)$", flags=re.IGNORECASE | re.MULTILINE)
+    match = pattern.search(block)
+    if not match:
+        return ""
+    start = match.end()
+    next_field = re.search(r"^\s*(?:[-*]\s*)?(?:\*\*)?[A-Za-z][A-Za-z /-]{1,40}(?:\*\*)?\s*:\s+", block[start:], flags=re.MULTILINE)
+    end = start + next_field.start() if next_field else len(block)
+    value = (match.group(1) + "\n" + block[start:end]).strip()
+    return value
+
+
+def validate_tasks_artifact(target: str | Path, request_id: str) -> dict[str, Any]:
     path = tasks_path(target, request_id)
     if not path.exists():
         raise HarnessError(f"Missing artifact: {path}")
     text = path.read_text(encoding="utf-8")
-    return [marker for marker in TASKS_MARKERS if marker not in text]
+    missing_markers = [marker for marker in TASKS_MARKERS if marker not in text]
+    blocks = task_blocks(text)
+    quality_problems: list[str] = []
+
+    if not blocks:
+        quality_problems.append("tasks.md: define each task with a '## Task <id>: <title>' heading")
+
+    if _has_placeholder(text):
+        quality_problems.append("tasks.md: contains placeholder text")
+
+    for index, item in enumerate(blocks, start=1):
+        title = item["title"]
+        content = item["content"]
+        label = f"Task {title or index}"
+        missing_fields = [field for field in TASK_REQUIRED_FIELDS if not task_field_value(content, field)]
+        if missing_fields:
+            quality_problems.append(f"{label}: missing fields: {', '.join(missing_fields)}")
+            continue
+
+        size = task_field_value(content, "Size").upper()
+        normalized_size = re.sub(r"[^A-Z/]", "", size)
+        if normalized_size not in ALLOWED_TASK_SIZES:
+            quality_problems.append(f"{label}: size must be XS or S")
+
+        files = task_field_value(content, "Files")
+        if "`" not in files and "/" not in files and "." not in files:
+            quality_problems.append(f"{label}: Files must name likely paths or path patterns")
+
+        verification = task_field_value(content, "Verify").lower()
+        if not any(marker in verification for marker in ["run ", "python", "npm", "pytest", "unittest", "manual", "evidence", "command"]):
+            quality_problems.append(f"{label}: Verify must name command or evidence")
+
+        scenario = task_field_value(content, "Scenario").lower()
+        if scenario and not all(marker in scenario for marker in ["given", "when", "then"]):
+            quality_problems.append(f"{label}: Scenario must use Given/When/Then")
+
+    return {
+        "missing_markers": missing_markers,
+        "quality_problems": quality_problems,
+        "task_count": len(blocks),
+    }
+
+
+def validate_tasks(target: str | Path, request_id: str) -> list[str]:
+    result = validate_tasks_artifact(target, request_id)
+    return [f"missing marker: {item}" for item in result["missing_markers"]] + list(result["quality_problems"])
 
 
 def ensure_request_dirs(target: str | Path, request_id: str) -> Path:

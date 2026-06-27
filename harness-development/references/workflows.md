@@ -8,8 +8,8 @@
 4. Harness scan: inspect `.harness/`, command registry, project docs, tests, and known failures.
 5. Context selection: load only relevant memory, docs, files, and examples.
 6. Specify: persist `spec.md` and validate it.
-7. Plan: persist `plan.md` only after completed intake and spec approval.
-8. Tasks: persist `tasks.md` only after plan approval.
+7. Plan: persist `plan.md` only after completed intake and spec approval. Apply WBS decomposition, dependency graphing, ADR/RAPID decisions, Cynefin complexity classification, verification matrixing, premortem risks, sequencing rationale, and parallelization boundaries; approve only when strict validation passes.
+8. Tasks: persist `tasks.md` only after plan approval. Break work into atomic XS/S tasks with exact scope, non-scope, acceptance, Given/When/Then scenario when applicable, verification evidence, dependencies, likely files, risk notes, rollback/repair, and parallelization label; approve only when strict validation passes.
 9. Implement: make small changes and update state/history after meaningful steps.
 10. Feedback: run targeted deterministic checks first, then broader checks as risk grows.
 11. Failure attribution: diagnose failed checks before repair.
@@ -24,3 +24,7 @@ Use handoff packets for architecture, security, test, UI, product, release, or c
 ## Harness Improvement
 
 When the same failure mode repeats, add or propose a durable control: rule, doc, test, checker, command registry entry, known-failure note, review prompt, or permission boundary.
+
+## Planning And Task Breakdown
+
+Treat `quality_problems` from `plan_engine.py validate` and `task_engine.py validate` as blockers. Approved plan and task gates record `planning_quality` evidence in `state.json`; downstream transitions use the same validators.

@@ -47,8 +47,8 @@ Each phase must update `.harness/requests/<request_id>/state.json` and append me
 - Complete intake before approving `spec.md` or entering PLAN.
 - Persist `spec.md` after intake. Include objective, stack, commands, project structure, code style, testing strategy, boundaries, success criteria, assumptions, and open questions.
 - Validate and approve the spec gate before creating `plan.md`.
-- Validate and approve the plan gate before creating `tasks.md`.
-- Validate and approve the tasks gate before implementation.
+- Validate and approve the strict research-backed plan gate before creating `tasks.md`. The plan must include WBS decomposition, dependency graph, implementation slices, decision records, verification matrix, premortem risks, complexity classification, sequencing rationale, and parallelization boundaries.
+- Validate and approve the strict task gate before implementation. Every task must be atomic, XS/S-sized, dependency-explicit, independently verifiable, and include exact scope, non-scope, acceptance, scenario, files, risk notes, rollback/repair, and parallelization label.
 - Record commands, failures, repairs, approvals, handoffs, and verification events as history.
 - Generate `verification-report.md` before claiming completion.
 - Summarize substantial work with `episode_engine.py`.
@@ -136,9 +136,9 @@ python3 scripts/plan_engine.py validate --target /path/to/project --request-id <
 python3 scripts/plan_engine.py approve --target /path/to/project --request-id <request_id>
 ```
 
-Use it during `PLAN`. The plan should describe implementation strategy, verification strategy, risks, and unresolved questions. Do not create `tasks.md` until this gate is approved.
+Use it during `PLAN`. The plan must apply WBS, INVEST, SMART, ADR, RAPID, Cynefin, Gherkin, and premortem thinking. `validate` reports missing sections and `quality_problems`; `approve` fails until the strict plan contract passes and records `planning_quality.plan` in state. Do not create `tasks.md` until this gate is approved.
 
-Outputs: `.harness/requests/<request_id>/plan.md`, approval state, and history events.
+Outputs: `.harness/requests/<request_id>/plan.md`, approval state, `planning_quality.plan`, and history events.
 
 ### `task_engine.py`
 
@@ -152,9 +152,9 @@ python3 scripts/task_engine.py validate --target /path/to/project --request-id <
 python3 scripts/task_engine.py approve --target /path/to/project --request-id <request_id>
 ```
 
-Use it during `TASKS`. Each task must include acceptance, verification, dependencies, and likely files. Do not enter implementation until this gate is approved.
+Use it during `TASKS`. Each task must be an atomic XS/S work item with task ID, outcome, exact scope, non-scope, acceptance, Gherkin-style scenario when applicable, verification command/evidence, dependencies, likely files, risk notes, rollback/repair, and parallelization label. `validate` reports missing markers and per-task `quality_problems`; `approve` fails until all tasks pass and records `planning_quality.tasks` in state. Do not enter implementation until this gate is approved.
 
-Outputs: `.harness/requests/<request_id>/tasks.md`, approval state, and history events.
+Outputs: `.harness/requests/<request_id>/tasks.md`, approval state, `planning_quality.tasks`, and history events.
 
 ### `harness_state.py`
 
@@ -324,6 +324,7 @@ Load only the reference needed for the current activity:
 - `references/controls.md`: feedforward, feedback, permission, review, and entropy controls.
 - `references/state-memory.md`: task state, project memory, context selection, and handoff rules.
 - `references/prompting.md`: prompt packet requirements for each phase.
+- `references/planning-task-breakdown.md`: research-backed plan/task quality gates, framework mapping, and atomic task contract.
 - `references/tools.md`: command registry, tool use, MCP, and evidence capture rules.
 - `references/sonar.md`: Docker-based Sonar template and execution policy.
 - `references/evaluation.md`: definition of done, verification reports, episode traces, and metrics.

@@ -7,6 +7,8 @@ Required state fields:
 - `request_id`, `objective`, `phase`, `status`
 - `approvals.spec`, `approvals.plan`, `approvals.tasks`
 - `intake.status`, `intake.task_type`, `intake.required_fields`, `intake.answered_fields`, `intake.waived_fields`, `intake.question_rounds`
+- `planning_quality.plan.status`, `planning_quality.plan.frameworks`, `planning_quality.plan.validated_at`
+- `planning_quality.tasks.status`, `planning_quality.tasks.minimum_size`, `planning_quality.tasks.validated_at`, `planning_quality.tasks.task_count`
 - `acceptance_criteria`, `non_goals`, `risk_level`, `permissions`
 - `context_sources`, `inspected_files`, `changed_files`
 - `decisions`, `assumptions`, `open_questions`
@@ -16,6 +18,8 @@ Required state fields:
 Project memory is durable and lives under `.harness/memory/`.
 
 Request intake lives in `.harness/requests/<request_id>/intake.md` and `state.json`. Request creation starts as a draft; the agent then asks adaptive interview questions. Planning stays blocked until required intake fields are answered or explicitly waived and `intake.status` is `complete`.
+
+Plan and task quality evidence lives in `state.json` under `planning_quality`. It records whether the strict plan and task gates have passed, which planning frameworks were represented, the required XS/S task size floor, validation timestamps, and task count. Top-level `decisions`, `assumptions`, `open_questions`, `risk_level`, and `verification_status` remain the authoritative implementation state.
 
 Memory artifacts:
 
