@@ -5,10 +5,25 @@ from __future__ import annotations
 
 import argparse
 
-from harness_common import load_state, main_guard, print_json, request_dir, tasks_path, plan_path, spec_path, now_iso
+from harness_common import intake_path, load_state, main_guard, print_json, request_dir, tasks_path, plan_path, spec_path, now_iso
 
 
 PHASE_INSTRUCTIONS = {
+    "intake": """Interview the user before planning. Ask adaptive question batches, persist answers in intake.md/state.json, and do not move to spec approval until intake is complete.
+
+Required output contract:
+1. Objective
+2. Task type
+3. Audience or user
+4. Desired outcome
+5. Acceptance criteria
+6. Non-goals
+7. Constraints
+8. Permissions
+9. Verification expectations
+10. Assumptions, waivers, and blocking open questions
+
+Use a common first batch, then type-specific follow-ups for feature, bug, refactor, UI/runtime, security/reliability, review, maintenance, or harness-improvement work. Ask risk follow-ups for migrations, external systems, credentials, destructive actions, production impact, or ambiguous product behavior.""",
     "specify": "Derive assumptions, objective, success criteria, boundaries, risk, and open questions. Persist updates in spec.md.",
     "plan": "Use the approved spec to produce dependency-ordered implementation strategy and verification checkpoints.",
     "tasks": "Break the approved plan into small tasks with acceptance, verification, dependencies, and likely files.",
@@ -38,6 +53,7 @@ Objective: {state.get('objective')}
 
 ## Durable Artifacts
 
+- Intake: `{intake_path(args.target, args.request_id)}`
 - Spec: `{spec_path(args.target, args.request_id)}`
 - Plan: `{plan_path(args.target, args.request_id)}`
 - Tasks: `{tasks_path(args.target, args.request_id)}`
@@ -46,7 +62,7 @@ Objective: {state.get('objective')}
 
 ## Gating Rule
 
-Do not advance phases without validating and approving the current gate in `state.json`.
+Do not approve `spec.md` or enter PLAN until intake is complete. Do not advance later phases without validating and approving the current gate in `state.json`.
 """
 
 

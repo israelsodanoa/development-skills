@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "request_id": "20260627-192129-interview-request-creation",
+  "objective": "Improve request creation so intake becomes a structured interview that captures implementation-ready requirements before planning.",
+  "phase": "SPECIFY",
+  "status": "draft",
+  "approvals": {
+    "spec": false,
+    "plan": false,
+    "tasks": false
+  },
+  "acceptance_criteria": [],
+  "non_goals": [],
+  "risk_level": {
+    "level": "unknown",
+    "reason": ""
+  },
+  "permissions": {
+    "always": [],
+    "ask_first": [],
+    "never": []
+  },
+  "context_sources": [],
+  "inspected_files": [],
+  "changed_files": [],
+  "decisions": [],
+  "assumptions": [],
+  "open_questions": [],
+  "commands_run": [],
+  "verification_status": [],
+  "failure_attributions": [],
+  "interventions": [],
+  "next_action": "Write and validate spec.md.",
+  "created_at": "2026-06-27T19:21:29+00:00",
+  "updated_at": "2026-06-27T19:21:29+00:00"
+}

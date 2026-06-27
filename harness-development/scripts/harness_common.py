@@ -45,6 +45,42 @@ PLAN_SECTIONS = [
 
 TASKS_MARKERS = ["Task:", "Acceptance:", "Verify:", "Dependencies:", "Files:"]
 
+INTAKE_TASK_TYPES = [
+    "feature",
+    "bug",
+    "refactor",
+    "ui_runtime",
+    "security_reliability",
+    "review",
+    "harness_improvement",
+    "maintenance",
+    "unknown",
+]
+
+INTAKE_REQUIRED_FIELDS = [
+    "objective",
+    "task_type",
+    "audience",
+    "desired_outcome",
+    "success_criteria",
+    "non_goals",
+    "constraints",
+    "permissions",
+    "verification_expectations",
+]
+
+INTAKE_FIELD_LABELS = {
+    "objective": "Objective",
+    "task_type": "Task type",
+    "audience": "Audience or user",
+    "desired_outcome": "Desired outcome",
+    "success_criteria": "Success criteria",
+    "non_goals": "Non-goals",
+    "constraints": "Constraints",
+    "permissions": "Permissions",
+    "verification_expectations": "Verification expectations",
+}
+
 
 class HarnessError(RuntimeError):
     """Raised for LLM-readable harness failures."""
@@ -149,6 +185,10 @@ def verification_path(target: str | Path, request_id: str) -> Path:
     return request_dir(target, request_id) / "verification-report.md"
 
 
+def intake_path(target: str | Path, request_id: str) -> Path:
+    return request_dir(target, request_id) / "intake.md"
+
+
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug[:48] or "request"
@@ -157,6 +197,19 @@ def slugify(value: str) -> str:
 def make_request_id(title: str) -> str:
     stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     return f"{stamp}-{slugify(title)}"
+
+
+def default_intake(task_type: str = "unknown") -> dict[str, Any]:
+    return {
+        "status": "incomplete",
+        "task_type": normalize_task_type(task_type),
+        "required_fields": list(INTAKE_REQUIRED_FIELDS),
+        "answered_fields": [],
+        "waived_fields": [],
+        "question_rounds": [],
+        "answers": {},
+        "waivers": {},
+    }
 
 
 def default_state(request_id: str, objective: str) -> dict[str, Any]:
@@ -182,7 +235,8 @@ def default_state(request_id: str, objective: str) -> dict[str, Any]:
         "verification_status": [],
         "failure_attributions": [],
         "interventions": [],
-        "next_action": "Write and validate spec.md.",
+        "intake": default_intake(),
+        "next_action": "Run intake interview and complete intake before spec approval.",
         "created_at": stamp,
         "updated_at": stamp,
     }
@@ -195,6 +249,132 @@ def load_state(target: str | Path, request_id: str) -> dict[str, Any]:
 def save_state(target: str | Path, request_id: str, state: dict[str, Any]) -> None:
     state["updated_at"] = now_iso()
     write_json(state_path(target, request_id), state)
+
+
+def normalize_task_type(value: str | None) -> str:
+    task_type = (value or "unknown").strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "ui": "ui_runtime",
+        "runtime": "ui_runtime",
+        "security": "security_reliability",
+        "reliability": "security_reliability",
+        "harness": "harness_improvement",
+        "improvement": "harness_improvement",
+    }
+    task_type = aliases.get(task_type, task_type)
+    return task_type if task_type in INTAKE_TASK_TYPES else "unknown"
+
+
+def _unique_strings(values: Iterable[Any]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        text = str(value).strip()
+        if text and text not in seen:
+            result.append(text)
+            seen.add(text)
+    return result
+
+
+def ensure_intake_state(state: dict[str, Any]) -> dict[str, Any]:
+    intake = state.get("intake")
+    if not isinstance(intake, dict):
+        intake = {}
+    intake.setdefault("status", "incomplete")
+    if intake["status"] not in {"incomplete", "complete"}:
+        intake["status"] = "incomplete"
+    intake["task_type"] = normalize_task_type(str(intake.get("task_type", "unknown")))
+
+    required = _unique_strings(intake.get("required_fields", []))
+    for field in INTAKE_REQUIRED_FIELDS:
+        if field not in required:
+            required.append(field)
+    intake["required_fields"] = required
+    intake["answered_fields"] = _unique_strings(intake.get("answered_fields", []))
+    intake["waived_fields"] = _unique_strings(intake.get("waived_fields", []))
+    intake.setdefault("question_rounds", [])
+    if not isinstance(intake["question_rounds"], list):
+        intake["question_rounds"] = []
+    intake.setdefault("answers", {})
+    if not isinstance(intake["answers"], dict):
+        intake["answers"] = {}
+    intake.setdefault("waivers", {})
+    if not isinstance(intake["waivers"], dict):
+        intake["waivers"] = {}
+    state["intake"] = intake
+    return intake
+
+
+def incomplete_intake_fields(state: dict[str, Any]) -> list[str]:
+    intake = ensure_intake_state(state)
+    completed = set(intake.get("answered_fields", [])) | set(intake.get("waived_fields", []))
+    return [field for field in intake.get("required_fields", []) if field not in completed]
+
+
+def intake_gate_problems(state: dict[str, Any]) -> list[str]:
+    intake = ensure_intake_state(state)
+    missing = incomplete_intake_fields(state)
+    problems: list[str] = []
+    if missing:
+        problems.append("missing required fields: " + ", ".join(missing))
+    if intake.get("status") != "complete":
+        problems.append(f"status is {intake.get('status', 'incomplete')}")
+    return problems
+
+
+def render_intake_document(state: dict[str, Any]) -> str:
+    intake = ensure_intake_state(state)
+    answers = intake.get("answers", {})
+    waivers = intake.get("waivers", {})
+    request_id = state.get("request_id", "unknown")
+    lines = [
+        f"# Intake: {request_id}",
+        "",
+        "## Normalized Summary",
+        "",
+        f"- Status: {intake.get('status', 'incomplete')}",
+        f"- Task type: {intake.get('task_type', 'unknown')}",
+        f"- Objective: {state.get('objective', '') or 'To be confirmed.'}",
+        "",
+        "## Required Fields",
+        "",
+    ]
+    completed = set(intake.get("answered_fields", [])) | set(intake.get("waived_fields", []))
+    for field in intake.get("required_fields", []):
+        mark = "x" if field in completed else " "
+        label = INTAKE_FIELD_LABELS.get(field, field.replace("_", " ").title())
+        lines.append(f"- [{mark}] `{field}` - {label}")
+    lines += ["", "## Answers", ""]
+    if answers:
+        for field, record in answers.items():
+            kind = record.get("kind", "answer") if isinstance(record, dict) else "answer"
+            value = record.get("value", "") if isinstance(record, dict) else str(record)
+            lines += [f"### {field}", "", f"- Kind: {kind}", f"- Value: {value}", ""]
+    else:
+        lines.append("- None recorded yet.")
+    lines += ["", "## Waivers", ""]
+    if waivers:
+        for field, record in waivers.items():
+            reason = record.get("reason", "") if isinstance(record, dict) else str(record)
+            lines += [f"- `{field}`: {reason}"]
+    else:
+        lines.append("- None recorded.")
+    lines += ["", "## Question Rounds", ""]
+    rounds = intake.get("question_rounds", [])
+    if rounds:
+        for item in rounds:
+            lines.append(f"- {item.get('timestamp', '')}: {item.get('batch', '')} ({', '.join(item.get('question_ids', []))})")
+    else:
+        lines.append("- No question batches recorded yet.")
+    lines += ["", "## Open Questions", ""]
+    open_questions = state.get("open_questions", [])
+    lines += [f"- {question}" for question in open_questions] or ["- None recorded."]
+    return "\n".join(lines) + "\n"
+
+
+def intake_template(request_id: str, objective: str) -> str:
+    state = default_state(request_id, objective)
+    return render_intake_document(state)
 
 
 def history_event(event_type: str, summary: str, **payload: Any) -> dict[str, Any]:

@@ -11,6 +11,7 @@ from harness_common import (
     PHASES,
     HarnessError,
     append_history,
+    intake_gate_problems,
     load_registry,
     load_state,
     main_guard,
@@ -62,6 +63,10 @@ def transition(args: argparse.Namespace) -> None:
         raise HarnessError(f"Cannot enter {target_phase}; {gate} gate is not approved")
     if target_phase == "PLAN" and validate_spec(args.target, args.request_id):
         raise HarnessError("Cannot enter PLAN; spec.md is invalid")
+    if target_phase == "PLAN":
+        problems = intake_gate_problems(state)
+        if problems:
+            raise HarnessError(f"Cannot enter PLAN; intake is incomplete: {'; '.join(problems)}")
     if target_phase == "TASKS" and validate_plan(args.target, args.request_id):
         raise HarnessError("Cannot enter TASKS; plan.md is invalid")
     if target_phase == "IMPLEMENT" and validate_tasks(args.target, args.request_id):
@@ -86,7 +91,8 @@ def validate(args: argparse.Namespace) -> None:
     phase = state.get("phase")
     if phase not in PHASES:
         missing.append("valid phase")
-    print_json({"request_id": args.request_id, "valid": not missing, "problems": missing, "phase": phase})
+    intake_problems = intake_gate_problems(state)
+    print_json({"request_id": args.request_id, "valid": not missing, "problems": missing, "phase": phase, "intake_problems": intake_problems})
 
 
 def show(args: argparse.Namespace) -> None:

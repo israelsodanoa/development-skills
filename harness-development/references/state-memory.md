@@ -6,6 +6,7 @@ Required state fields:
 
 - `request_id`, `objective`, `phase`, `status`
 - `approvals.spec`, `approvals.plan`, `approvals.tasks`
+- `intake.status`, `intake.task_type`, `intake.required_fields`, `intake.answered_fields`, `intake.waived_fields`, `intake.question_rounds`
 - `acceptance_criteria`, `non_goals`, `risk_level`, `permissions`
 - `context_sources`, `inspected_files`, `changed_files`
 - `decisions`, `assumptions`, `open_questions`
@@ -13,6 +14,8 @@ Required state fields:
 - `next_action`, `created_at`, `updated_at`
 
 Project memory is durable and lives under `.harness/memory/`.
+
+Request intake lives in `.harness/requests/<request_id>/intake.md` and `state.json`. Request creation starts as a draft; the agent then asks adaptive interview questions. Planning stays blocked until required intake fields are answered or explicitly waived and `intake.status` is `complete`.
 
 Memory artifacts:
 

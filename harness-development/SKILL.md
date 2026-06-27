@@ -19,13 +19,21 @@ The common engine lives in this skill's `scripts/` directory. Target projects re
 python3 /path/to/harness-development/scripts/init_project_harness.py --target /path/to/project
 ```
 
-2. Create a request before implementation:
+2. Create a draft request before implementation:
 
 ```bash
 python3 /path/to/harness-development/scripts/request_engine.py create --target /path/to/project --title "short task title" --objective "user-visible objective"
 ```
 
-3. Run the gated workflow for every implementation request:
+3. Run the intake interview and complete intake before spec approval:
+
+```bash
+python3 /path/to/harness-development/scripts/intake_engine.py questions --target /path/to/project --request-id <request_id>
+python3 /path/to/harness-development/scripts/intake_engine.py record --target /path/to/project --request-id <request_id> --field success_criteria --answer "testable criteria"
+python3 /path/to/harness-development/scripts/intake_engine.py complete --target /path/to/project --request-id <request_id>
+```
+
+4. Run the gated workflow for every implementation request:
 
 ```text
 SPECIFY -> PLAN -> TASKS -> IMPLEMENT -> VERIFY -> CLOSEOUT
@@ -35,7 +43,9 @@ Each phase must update `.harness/requests/<request_id>/state.json` and append me
 
 ## Required Workflow
 
-- Persist `spec.md` first. Include objective, stack, commands, project structure, code style, testing strategy, boundaries, success criteria, assumptions, and open questions.
+- Persist `intake.md` first. Use an adaptive interview to capture objective, task type, audience, desired outcome, success criteria, non-goals, constraints, permissions, verification expectations, assumptions, waivers, and blocking open questions.
+- Complete intake before approving `spec.md` or entering PLAN.
+- Persist `spec.md` after intake. Include objective, stack, commands, project structure, code style, testing strategy, boundaries, success criteria, assumptions, and open questions.
 - Validate and approve the spec gate before creating `plan.md`.
 - Validate and approve the plan gate before creating `tasks.md`.
 - Validate and approve the tasks gate before implementation.
@@ -76,7 +86,27 @@ python3 scripts/request_engine.py show --target /path/to/project --request-id <r
 
 Use this before writing a spec for any implementation request. The generated request ID becomes the stable key for every later command.
 
-Outputs: `.harness/requests/<request_id>/state.json`, `history.jsonl`, `handoffs/`, `prompt-packets/`, and `evidence/`.
+Outputs: `.harness/requests/<request_id>/state.json`, `intake.md`, `history.jsonl`, `handoffs/`, `prompt-packets/`, and `evidence/`.
+
+### `intake_engine.py`
+
+Create, run, validate, and complete the request intake interview.
+
+Optimal usage:
+
+```bash
+python3 scripts/intake_engine.py create --target /path/to/project --request-id <request_id>
+python3 scripts/intake_engine.py questions --target /path/to/project --request-id <request_id>
+python3 scripts/intake_engine.py record --target /path/to/project --request-id <request_id> --field objective --answer "specific outcome"
+python3 scripts/intake_engine.py record --target /path/to/project --request-id <request_id> --field non_goals --waive --reason "No exclusions"
+python3 scripts/intake_engine.py validate --target /path/to/project --request-id <request_id>
+python3 scripts/intake_engine.py complete --target /path/to/project --request-id <request_id>
+python3 scripts/intake_engine.py interview --target /path/to/project --request-id <request_id> --complete
+```
+
+Use this immediately after request creation. The first question batch covers objective, task type, audience, desired outcome, success criteria, non-goals, constraints, permissions, and verification expectations. Follow-up batches adapt to feature, bug, refactor, UI/runtime, security/reliability, review, maintenance, harness-improvement, and risk-heavy work.
+
+Outputs: `.harness/requests/<request_id>/intake.md`, `state.json` intake metadata, top-level acceptance criteria/non-goals/permissions/risk fields when recorded, and intake history events.
 
 ### `spec_engine.py`
 
@@ -90,7 +120,7 @@ python3 scripts/spec_engine.py validate --target /path/to/project --request-id <
 python3 scripts/spec_engine.py approve --target /path/to/project --request-id <request_id>
 ```
 
-Use it during `SPECIFY`. Fill the generated spec with objective, tech stack, commands, project structure, code style, testing strategy, boundaries, success criteria, and open questions before approval. Do not create `plan.md` until this gate is approved.
+Use it during `SPECIFY`. Fill the generated spec with objective, tech stack, commands, project structure, code style, testing strategy, boundaries, success criteria, and open questions before approval. `approve` fails until intake is complete. Do not create `plan.md` until this gate is approved.
 
 Outputs: `.harness/requests/<request_id>/spec.md`, approval state, and history events.
 
@@ -220,7 +250,7 @@ python3 scripts/prompt_engine.py --target /path/to/project --request-id <request
 python3 scripts/prompt_engine.py --target /path/to/project --request-id <request_id> --phase review --print
 ```
 
-Use prompt packets when handing work to another agent, restarting after compaction, or narrowing context for a specific phase. Available phases: `specify`, `plan`, `tasks`, `implement`, `failure`, `review`, `verify`, `improve`, and `handoff`.
+Use prompt packets when handing work to another agent, restarting after compaction, or narrowing context for a specific phase. Available phases: `intake`, `specify`, `plan`, `tasks`, `implement`, `failure`, `review`, `verify`, `improve`, and `handoff`.
 
 Outputs: `.harness/requests/<request_id>/prompt-packets/<phase>.md` when `--write` is used.
 

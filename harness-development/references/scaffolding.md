@@ -21,6 +21,7 @@ Required layout:
   requests/
     <request_id>/
       spec.md
+      intake.md
       plan.md
       tasks.md
       state.json

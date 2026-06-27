@@ -5,15 +5,52 @@ from __future__ import annotations
 
 import argparse
 
-from harness_common import append_history, load_state, main_guard, print_json, save_state, spec_path, validate_spec, write_if_absent
+from harness_common import (
+    HarnessError,
+    append_history,
+    ensure_intake_state,
+    intake_gate_problems,
+    load_state,
+    main_guard,
+    print_json,
+    save_state,
+    spec_path,
+    validate_spec,
+    write_if_absent,
+)
 
 
-def spec_template(request_id: str, objective: str) -> str:
+def markdown_items(items: list, default: str) -> str:
+    if not items:
+        return f"- {default}"
+    lines: list[str] = []
+    for item in items:
+        if isinstance(item, dict):
+            text = item.get("text") or item.get("value") or str(item)
+        else:
+            text = str(item)
+        lines.append(f"- {text}")
+    return "\n".join(lines)
+
+
+def spec_template(request_id: str, state: dict) -> str:
+    ensure_intake_state(state)
+    objective = state.get("objective", "")
+    intake_answers = state.get("intake", {}).get("answers", {})
+    verification = intake_answers.get("verification_expectations", {}).get("value", "Document the nearest tests, required regression level, coverage expectations, and exact verification commands.")
+    constraints = intake_answers.get("constraints", {}).get("value", "No additional constraints recorded.")
+    audience = intake_answers.get("audience", {}).get("value", "To be confirmed from intake.")
+    desired_outcome = intake_answers.get("desired_outcome", {}).get("value", "To be confirmed from intake.")
+    assumptions = state.get("assumptions", [])
     return f"""# Spec: {request_id}
 
 ## Objective
 
 {objective}
+
+Audience: {audience}
+
+Desired outcome: {desired_outcome}
 
 ## Tech Stack
 
@@ -36,27 +73,36 @@ Document local naming, formatting, and example patterns before implementation.
 
 ## Testing Strategy
 
-Document the nearest tests, required regression level, coverage expectations, and exact verification commands.
+{verification}
 
 ## Boundaries
 
 - Always: preserve unrelated user work; record evidence in `.harness`.
 - Ask first: dependencies, CI, migrations, Docker/Sonar execution, external systems, releases.
 - Never: commit secrets, fabricate evidence, remove failing tests to claim success.
+- Constraints: {constraints}
+
+### Non-Goals
+
+{markdown_items(state.get("non_goals", []), "None recorded.")}
 
 ## Success Criteria
 
-- [ ] Define a concrete, testable criterion before planning.
+{markdown_items(state.get("acceptance_criteria", []), "Define a concrete, testable criterion before planning.")}
+
+## Assumptions
+
+{markdown_items(assumptions, "None recorded.")}
 
 ## Open Questions
 
-- None recorded yet.
+{markdown_items(state.get("open_questions", []), "None recorded.")}
 """
 
 
 def create(args: argparse.Namespace) -> None:
     state = load_state(args.target, args.request_id)
-    wrote = write_if_absent(spec_path(args.target, args.request_id), spec_template(args.request_id, state["objective"]), force=args.force)
+    wrote = write_if_absent(spec_path(args.target, args.request_id), spec_template(args.request_id, state), force=args.force)
     append_history(args.target, args.request_id, "spec.created" if wrote else "spec.exists", "Spec artifact checked")
     print_json({"request_id": args.request_id, "path": str(spec_path(args.target, args.request_id)), "written": wrote})
 
@@ -71,6 +117,9 @@ def approve(args: argparse.Namespace) -> None:
     if missing:
         raise SystemExit(f"ERROR: spec is missing sections: {', '.join(missing)}")
     state = load_state(args.target, args.request_id)
+    intake_problems = intake_gate_problems(state)
+    if intake_problems:
+        raise HarnessError(f"Cannot approve spec; intake is incomplete: {'; '.join(intake_problems)}")
     state["approvals"]["spec"] = True
     state["status"] = "spec_approved"
     state["next_action"] = "Create plan.md."
