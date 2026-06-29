@@ -1,5 +1,27 @@
 {
   "schema_version": 1,
+  "memory_model": {
+    "working_memory": ".harness/requests/<request_id>/state.json",
+    "episodic_memory": ".harness/requests/<request_id>/history.jsonl",
+    "semantic_memory": [
+      "project_map",
+      "architecture",
+      "testing",
+      "domain",
+      "tools",
+      "decisions",
+      "quality"
+    ],
+    "procedural_memory": [
+      ".harness/memory/known-failures.json",
+      ".harness/memory/control-gaps.json"
+    ],
+    "policy": {
+      "retrieve_before_action": true,
+      "promotion_requires_evidence": true,
+      "prune_requires_reason": true
+    }
+  },
   "project_map": {
     "summary": "",
     "sources": []
@@ -10,5 +32,7 @@
   "tools": [],
   "decisions": [],
   "quality": [],
+  "promotion_log": [],
+  "pruning_log": [],
   "updated_at": ""
 }

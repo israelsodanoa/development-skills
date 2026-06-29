@@ -75,6 +75,14 @@ TASK_REQUIRED_FIELDS = [
 
 ALLOWED_TASK_SIZES = {"XS", "S"}
 
+MEMORY_BACKENDS = [
+    ".harness/requests/<request_id>/state.json",
+    ".harness/requests/<request_id>/history.jsonl",
+    ".harness/memory/memory-index.json",
+    ".harness/memory/known-failures.json",
+    ".harness/memory/control-gaps.json",
+]
+
 PLACEHOLDER_PATTERNS = [
     r"\bplaceholder\b",
     r"\breplace\b",
@@ -191,6 +199,12 @@ Reject placeholder tasks, vague file lists, tasks joined with "and", and tasks t
     "improve": "Classify repeated failures into missing controls and propose durable harness changes.",
     "handoff": "Produce resume-ready state with completed work, pending work, risks, decisions, assumptions, and next action.",
 }
+
+MEMORY_GUARDRAILS = """1. Before action, retrieve relevant memory and record selected or skipped sources with `memory_engine.py retrieve`.
+2. Treat request `state.json` as working memory and `history.jsonl` as episodic memory; do not rely on hidden conversation state.
+3. After meaningful evidence, record reflections with `memory_engine.py reflect` before changing durable project memory.
+4. Promote only evidence-backed semantic or procedural knowledge with `memory_engine.py promote`.
+5. Record stale, misleading, or superseded memory with `memory_engine.py prune`; do not silently delete user-edited memory."""
 
 
 class HarnessError(RuntimeError):
@@ -381,6 +395,7 @@ def default_state(request_id: str, objective: str) -> dict[str, Any]:
         "interventions": [],
         "intake": default_intake(),
         "planning_quality": default_planning_quality(),
+        "memory": default_memory_state(),
         "artifacts": default_artifacts_state(),
         "next_action": "Run intake interview and complete intake before spec approval.",
         "created_at": stamp,
@@ -429,6 +444,31 @@ def default_planning_quality() -> dict[str, Any]:
     }
 
 
+def default_memory_state() -> dict[str, Any]:
+    return {
+        "working": {
+            "retrieved_sources": [],
+            "skipped_sources": [],
+            "active_notes": [],
+            "last_retrieved_at": "",
+        },
+        "episodic": {
+            "history_path": "history.jsonl",
+            "reflections": [],
+        },
+        "long_term": {
+            "promotions": [],
+            "pruning_log": [],
+        },
+        "policy": {
+            "retrieve_before_action": True,
+            "promotion_requires_evidence": True,
+            "prune_requires_reason": True,
+            "allowed_backends": list(MEMORY_BACKENDS),
+        },
+    }
+
+
 def default_artifacts_state() -> dict[str, Any]:
     return {
         "evidence_manifest": "",
@@ -436,6 +476,28 @@ def default_artifacts_state() -> dict[str, Any]:
         "continuation_handoff": "",
         "last_synced_at": "",
     }
+
+
+def ensure_memory_state(state: dict[str, Any]) -> dict[str, Any]:
+    memory = state.get("memory")
+    if not isinstance(memory, dict):
+        memory = {}
+    default = default_memory_state()
+    for section, section_default in default.items():
+        existing = memory.get(section)
+        if not isinstance(existing, dict):
+            memory[section] = dict(section_default)
+            continue
+        for key, value in section_default.items():
+            if isinstance(value, list):
+                existing.setdefault(key, [])
+            elif isinstance(value, dict):
+                current = existing.get(key)
+                existing[key] = current if isinstance(current, dict) else dict(value)
+            else:
+                existing.setdefault(key, value)
+    state["memory"] = memory
+    return memory
 
 
 def ensure_planning_quality_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -890,8 +952,15 @@ Objective: {state.get('objective')}
 - Tasks: `{tasks_path(target, request_id)}`
 - State: `{request_dir(target, request_id) / 'state.json'}`
 - History: `{history_path(target, request_id)}`
+- Project memory: `{harness_dir(target) / 'memory' / 'memory-index.json'}`
+- Known failures: `{harness_dir(target) / 'memory' / 'known-failures.json'}`
+- Control gaps: `{harness_dir(target) / 'memory' / 'control-gaps.json'}`
 - Evidence manifest: `{evidence_manifest_path(target, request_id)}`
 - Continuation handoff: `{continuation_handoff_path(target, request_id)}`
+
+## Memory Guardrails
+
+{MEMORY_GUARDRAILS}
 
 ## Gating Rule
 

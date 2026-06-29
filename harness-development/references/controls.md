@@ -5,6 +5,7 @@ Use feedforward controls before action and feedback controls after action.
 Feedforward controls:
 
 - Accepted spec and success criteria.
+- Retrieved working, semantic, and procedural memory recorded with selected and skipped sources.
 - Project map and relevant architecture/testing/domain memory.
 - Command registry with exact executable commands.
 - Known failures and local anti-patterns.
@@ -16,8 +17,17 @@ Feedback controls:
 - Sonar, secrets, dependency, SAST, and security checks for risk-sensitive changes.
 - Browser, screenshots, logs, traces, API probes, and metrics for runtime behavior.
 - Self-review and specialist review for semantic risks.
+- Reflection, promotion, and pruning events when evidence changes durable memory.
 
 Prefer deterministic controls when they cheaply express the requirement. Use inferential review for product fit, architecture tradeoffs, security reasoning, UI quality, and test meaning.
+
+Memory controls:
+
+- Retrieve before action: record relevant `memory-index.json`, `known-failures.json`, `control-gaps.json`, docs, and files with `memory_engine.py retrieve`.
+- Reflect after evidence: record lessons with `memory_engine.py reflect` before promoting them.
+- Promote selectively: write only evidence-backed semantic or procedural memory with `memory_engine.py promote`.
+- Prune conservatively: record stale or superseded memory with `memory_engine.py prune`; prefer status/pruning logs over silent deletion.
+- Treat missing, stale, conflicting, or low-confidence memory as a control gap when it can mislead a future agent.
 
 Permission tiers:
 
