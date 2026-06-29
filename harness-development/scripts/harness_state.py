@@ -15,8 +15,11 @@ from harness_common import (
     load_registry,
     load_state,
     main_guard,
+    missing_required_artifacts,
     print_json,
+    refresh_continuation_handoff,
     save_state,
+    sync_required_request_artifacts,
     validate_plan,
     validate_spec,
     validate_tasks,
@@ -81,18 +84,31 @@ def transition(args: argparse.Namespace) -> None:
     state["status"] = args.status or target_phase.lower()
     state["next_action"] = args.next_action or state.get("next_action", "")
     save_state(args.target, args.request_id, state)
+    artifacts = sync_required_request_artifacts(args.target, args.request_id, event_type="request.artifacts.backfilled")
     append_history(args.target, args.request_id, "state.transition", f"{current} -> {target_phase}", status=state["status"])
-    print_json({"request_id": args.request_id, "from": current, "to": target_phase, "status": state["status"]})
+    refresh_continuation_handoff(args.target, args.request_id)
+    print_json({"request_id": args.request_id, "from": current, "to": target_phase, "status": state["status"], "artifacts": artifacts["artifacts"]})
 
 
 def validate(args: argparse.Namespace) -> None:
+    sync_required_request_artifacts(args.target, args.request_id, event_type="request.artifacts.backfilled")
     state = load_state(args.target, args.request_id)
     missing = [field for field in ["request_id", "objective", "phase", "status", "approvals", "next_action"] if field not in state]
     phase = state.get("phase")
     if phase not in PHASES:
         missing.append("valid phase")
     intake_problems = intake_gate_problems(state)
-    print_json({"request_id": args.request_id, "valid": not missing, "problems": missing, "phase": phase, "intake_problems": intake_problems})
+    artifact_problems = missing_required_artifacts(args.target, args.request_id)
+    print_json(
+        {
+            "request_id": args.request_id,
+            "valid": not missing and not artifact_problems,
+            "problems": missing,
+            "phase": phase,
+            "intake_problems": intake_problems,
+            "artifact_problems": artifact_problems,
+        }
+    )
 
 
 def show(args: argparse.Namespace) -> None:

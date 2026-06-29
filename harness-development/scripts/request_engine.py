@@ -18,6 +18,7 @@ from harness_common import (
     print_json,
     save_state,
     state_path,
+    sync_required_request_artifacts,
     write_if_absent,
 )
 
@@ -34,7 +35,16 @@ def create(args: argparse.Namespace) -> None:
     append_history(args.target, request_id, "request.created", f"Created request {request_id}", objective=state["objective"])
     intake_written = write_if_absent(intake_path(args.target, request_id), intake_template(request_id, state["objective"]), force=args.force)
     append_history(args.target, request_id, "intake.created" if intake_written else "intake.exists", "Intake artifact checked")
-    print_json({"request_id": request_id, "request_dir": str(path.parent), "state": str(path), "intake": str(intake_path(args.target, request_id))})
+    artifacts = sync_required_request_artifacts(args.target, request_id, force=args.force, event_type="request.artifacts.generated")
+    print_json(
+        {
+            "request_id": request_id,
+            "request_dir": str(path.parent),
+            "state": str(path),
+            "intake": str(intake_path(args.target, request_id)),
+            "artifacts": artifacts["artifacts"],
+        }
+    )
 
 
 def show(args: argparse.Namespace) -> None:

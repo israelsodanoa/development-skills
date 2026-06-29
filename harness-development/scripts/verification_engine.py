@@ -5,7 +5,17 @@ from __future__ import annotations
 
 import argparse
 
-from harness_common import append_history, load_state, main_guard, now_iso, print_json, save_state, verification_path
+from harness_common import (
+    append_history,
+    load_state,
+    main_guard,
+    now_iso,
+    print_json,
+    refresh_continuation_handoff,
+    refresh_evidence_manifest,
+    save_state,
+    verification_path,
+)
 
 
 def render_report(state: dict) -> str:
@@ -54,6 +64,8 @@ def render(args: argparse.Namespace) -> None:
     state["next_action"] = "Review verification report and close out when complete."
     save_state(args.target, args.request_id, state)
     append_history(args.target, args.request_id, "verification.rendered", "Rendered verification report", path=str(path))
+    refresh_evidence_manifest(args.target, args.request_id)
+    refresh_continuation_handoff(args.target, args.request_id)
     print_json({"request_id": args.request_id, "path": str(path)})
 
 

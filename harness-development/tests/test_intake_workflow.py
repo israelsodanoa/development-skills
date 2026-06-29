@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -52,6 +53,9 @@ class IntakeWorkflowTest(unittest.TestCase):
         path = self.target / ".harness" / "requests" / request_id / "state.json"
         return json.loads(path.read_text(encoding="utf-8"))
 
+    def request_dir(self, request_id: str) -> Path:
+        return self.target / ".harness" / "requests" / request_id
+
     def history(self, request_id: str) -> list[dict]:
         path = self.target / ".harness" / "requests" / request_id / "history.jsonl"
         return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -94,6 +98,7 @@ class IntakeWorkflowTest(unittest.TestCase):
         self.assertEqual(state["intake"]["task_type"], "unknown")
         self.assertIn("request.created", events)
         self.assertIn("intake.created", events)
+        self.assertIn("request.artifacts.generated", events)
 
         questions = self.json_output(
             self.run_script("intake_engine.py", "questions", "--target", str(self.target), "--request-id", request_id)
@@ -175,6 +180,46 @@ class IntakeWorkflowTest(unittest.TestCase):
         self.assertIn("Required output contract", result.stdout)
         self.assertIn("adaptive question", result.stdout)
         self.assertIn("Intake:", result.stdout)
+
+    def test_request_creation_generates_required_artifacts(self) -> None:
+        request_id = self.create_request("Artifact generation")
+        root = self.request_dir(request_id)
+
+        evidence = root / "evidence" / "manifest.md"
+        handoff = root / "handoffs" / "continuation.md"
+        prompt_packets = root / "prompt-packets"
+
+        self.assertTrue(evidence.exists())
+        self.assertTrue(handoff.exists())
+        self.assertTrue((prompt_packets / "intake.md").exists())
+        self.assertTrue((prompt_packets / "implement.md").exists())
+        self.assertTrue((prompt_packets / "verify.md").exists())
+
+        self.assertIn(request_id, evidence.read_text(encoding="utf-8"))
+        self.assertIn("Evidence Manifest", evidence.read_text(encoding="utf-8"))
+        self.assertTrue(self.state(request_id)["artifacts"]["continuation_handoff"].endswith("handoffs/continuation.md"))
+        self.assertIn("Prompt Packet: verify", (prompt_packets / "verify.md").read_text(encoding="utf-8"))
+        self.assertIn("Evidence manifest:", (prompt_packets / "verify.md").read_text(encoding="utf-8"))
+        self.assertIn("Handoff: continuation", handoff.read_text(encoding="utf-8"))
+
+    def test_state_validation_backfills_missing_required_artifacts(self) -> None:
+        request_id = self.create_request("Artifact backfill")
+        root = self.request_dir(request_id)
+
+        (root / "evidence" / "manifest.md").unlink()
+        (root / "handoffs" / "continuation.md").unlink()
+        shutil.rmtree(root / "prompt-packets")
+
+        result = self.json_output(
+            self.run_script("harness_state.py", "validate", "--target", str(self.target), "--request-id", request_id)
+        )
+
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["artifact_problems"], [])
+        self.assertTrue((root / "evidence" / "manifest.md").exists())
+        self.assertTrue((root / "handoffs" / "continuation.md").exists())
+        self.assertTrue((root / "prompt-packets" / "handoff.md").exists())
+        self.assertIn("request.artifacts.backfilled", [event["type"] for event in self.history(request_id)])
 
 
 if __name__ == "__main__":

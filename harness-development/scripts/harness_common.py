@@ -125,6 +125,73 @@ INTAKE_FIELD_LABELS = {
     "verification_expectations": "Verification expectations",
 }
 
+PROMPT_PHASES = [
+    "intake",
+    "specify",
+    "plan",
+    "tasks",
+    "implement",
+    "failure",
+    "review",
+    "verify",
+    "improve",
+    "handoff",
+]
+
+PROMPT_PHASE_INSTRUCTIONS = {
+    "intake": """Interview the user before planning. Ask adaptive question batches, persist answers in intake.md/state.json, and do not move to spec approval until intake is complete.
+
+Required output contract:
+1. Objective
+2. Task type
+3. Audience or user
+4. Desired outcome
+5. Acceptance criteria
+6. Non-goals
+7. Constraints
+8. Permissions
+9. Verification expectations
+10. Assumptions, waivers, and blocking open questions
+
+Use a common first batch, then type-specific follow-ups for feature, bug, refactor, UI/runtime, security/reliability, review, maintenance, or harness-improvement work. Ask risk follow-ups for migrations, external systems, credentials, destructive actions, production impact, or ambiguous product behavior.""",
+    "specify": "Derive assumptions, objective, success criteria, boundaries, risk, and open questions. Persist updates in spec.md.",
+    "plan": """Use the approved spec to produce a research-backed implementation plan that can pass the strict plan gate.
+
+Required output contract:
+1. Objective recap and planning standard.
+2. WBS decomposition map that covers deliverables.
+3. Dependency graph with explicit before/after relationships.
+4. Implementation strategy and implementation slices.
+5. Decision records using context, decision, rationale, and consequences; identify RAPID roles when ownership is ambiguous.
+6. Verification strategy and Verification Matrix mapping criteria to evidence and command.
+7. Premortem risks with failure mode and mitigation.
+8. Cynefin complexity classification and sequencing rationale.
+9. Parallelization boundaries that distinguish parallel and sequential work.
+10. Residual risks and open questions.
+
+Apply WBS, INVEST, SMART, ADR, RAPID, Cynefin, Gherkin, and premortem thinking. Do not approve the plan until every required section contains concrete detail and validation passes.""",
+    "tasks": """Break the approved plan into the lowest practical level: atomic XS/S tasks that can each be implemented and verified in one focused session.
+
+Required output contract for every task:
+1. Task ID and short title.
+2. Task, outcome, exact scope, and non-scope.
+3. Size limited to XS or S; split M, L, or XL work again.
+4. Acceptance criteria.
+5. Gherkin-style Given/When/Then scenario when behavior is observable.
+6. Verification command or evidence.
+7. Dependencies and likely files or path patterns.
+8. Risk notes and rollback/repair note.
+9. Parallelization label: parallel, sequential, or coordination-required.
+
+Reject placeholder tasks, vague file lists, tasks joined with "and", and tasks that touch independent subsystems. Do not approve `tasks.md` until strict validation passes.""",
+    "implement": "Complete one task at a time, preserve unrelated work, and record decisions, commands, changed files, and evidence.",
+    "failure": "Attribute the failed check before repair: expected, actual, likely cause, smallest fix, rerun check.",
+    "review": "Review diff scope, evidence coverage, architecture, security, product fit, and test quality.",
+    "verify": "Map each acceptance criterion to command, runtime, review, or documented-waiver evidence before closeout.",
+    "improve": "Classify repeated failures into missing controls and propose durable harness changes.",
+    "handoff": "Produce resume-ready state with completed work, pending work, risks, decisions, assumptions, and next action.",
+}
+
 
 class HarnessError(RuntimeError):
     """Raised for LLM-readable harness failures."""
@@ -233,6 +300,39 @@ def intake_path(target: str | Path, request_id: str) -> Path:
     return request_dir(target, request_id) / "intake.md"
 
 
+def evidence_dir(target: str | Path, request_id: str) -> Path:
+    return request_dir(target, request_id) / "evidence"
+
+
+def evidence_manifest_path(target: str | Path, request_id: str) -> Path:
+    return evidence_dir(target, request_id) / "manifest.md"
+
+
+def prompt_packets_dir(target: str | Path, request_id: str) -> Path:
+    return request_dir(target, request_id) / "prompt-packets"
+
+
+def prompt_packet_path(target: str | Path, request_id: str, phase: str) -> Path:
+    normalized = phase.strip().lower()
+    if normalized not in PROMPT_PHASE_INSTRUCTIONS:
+        raise HarnessError(f"Unknown prompt packet phase: {phase}")
+    return prompt_packets_dir(target, request_id) / f"{normalized}.md"
+
+
+def handoffs_dir(target: str | Path, request_id: str) -> Path:
+    return request_dir(target, request_id) / "handoffs"
+
+
+def continuation_handoff_path(target: str | Path, request_id: str) -> Path:
+    return handoffs_dir(target, request_id) / "continuation.md"
+
+
+def handoff_path(target: str | Path, request_id: str, specialist: str, stable: bool = False) -> Path:
+    name = re.sub(r"[^A-Za-z0-9_.-]+", "-", specialist.strip().lower()) or "continuation"
+    filename = f"{name}.md" if stable else f"{now_iso().replace(':', '-')}-{name}.md"
+    return handoffs_dir(target, request_id) / filename
+
+
 def slugify(value: str) -> str:
     slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
     return slug[:48] or "request"
@@ -281,6 +381,7 @@ def default_state(request_id: str, objective: str) -> dict[str, Any]:
         "interventions": [],
         "intake": default_intake(),
         "planning_quality": default_planning_quality(),
+        "artifacts": default_artifacts_state(),
         "next_action": "Run intake interview and complete intake before spec approval.",
         "created_at": stamp,
         "updated_at": stamp,
@@ -328,6 +429,15 @@ def default_planning_quality() -> dict[str, Any]:
     }
 
 
+def default_artifacts_state() -> dict[str, Any]:
+    return {
+        "evidence_manifest": "",
+        "prompt_packets": {},
+        "continuation_handoff": "",
+        "last_synced_at": "",
+    }
+
+
 def ensure_planning_quality_state(state: dict[str, Any]) -> dict[str, Any]:
     quality = state.get("planning_quality")
     if not isinstance(quality, dict):
@@ -342,6 +452,21 @@ def ensure_planning_quality_state(state: dict[str, Any]) -> dict[str, Any]:
             existing.setdefault(subkey, subvalue)
     state["planning_quality"] = quality
     return quality
+
+
+def ensure_artifacts_state(state: dict[str, Any]) -> dict[str, Any]:
+    artifacts = state.get("artifacts")
+    if not isinstance(artifacts, dict):
+        artifacts = {}
+    default = default_artifacts_state()
+    for key, value in default.items():
+        existing = artifacts.get(key)
+        if isinstance(value, dict):
+            artifacts[key] = existing if isinstance(existing, dict) else {}
+        else:
+            artifacts.setdefault(key, value)
+    state["artifacts"] = artifacts
+    return artifacts
 
 
 def ensure_intake_state(state: dict[str, Any]) -> dict[str, Any]:
@@ -656,6 +781,284 @@ def write_if_absent(path: Path, content: str, force: bool = False) -> bool:
         return False
     path.write_text(content, encoding="utf-8")
     return True
+
+
+def _display_text(item: Any) -> str:
+    if isinstance(item, dict):
+        for key in ["text", "summary", "value", "id", "path", "command_id", "command"]:
+            value = item.get(key)
+            if value:
+                return str(value)
+        return json.dumps(item, sort_keys=True)
+    return str(item)
+
+
+def _markdown_list(items: Iterable[Any], default: str = "None recorded.") -> list[str]:
+    lines = [f"- {_display_text(item)}" for item in items if str(_display_text(item)).strip()]
+    return lines or [f"- {default}"]
+
+
+def _acceptance_lines(criteria: list[Any]) -> list[str]:
+    if not criteria:
+        return ["- No acceptance criteria recorded yet."]
+    lines: list[str] = []
+    for index, criterion in enumerate(criteria, start=1):
+        if isinstance(criterion, dict):
+            cid = criterion.get("id", f"AC-{index:03d}")
+            text = criterion.get("text", "")
+            status = criterion.get("status", "unverified")
+            evidence = criterion.get("evidence", [])
+            residual = criterion.get("residual_risk", "")
+        else:
+            cid = f"AC-{index:03d}"
+            text = str(criterion)
+            status = "unverified"
+            evidence = []
+            residual = ""
+        evidence_text = ", ".join(str(item) for item in evidence) if isinstance(evidence, list) else str(evidence)
+        lines.append(f"- {cid}: {text} | status: {status} | evidence: {evidence_text or 'none'} | residual risk: {residual or 'none'}")
+    return lines
+
+
+def render_evidence_manifest(state: dict[str, Any]) -> str:
+    request_id = state.get("request_id", "unknown")
+    commands = state.get("commands_run", [])
+    runtime_evidence = state.get("runtime_evidence", [])
+    verification_status = state.get("verification_status", [])
+    lines = [
+        f"# Evidence Manifest: {request_id}",
+        "",
+        f"Generated: {now_iso()}",
+        f"Objective: {state.get('objective', '')}",
+        f"Current phase: {state.get('phase', '')}",
+        f"Status: {state.get('status', '')}",
+        "",
+        "## Acceptance Evidence",
+        "",
+        *_acceptance_lines(state.get("acceptance_criteria", [])),
+        "",
+        "## Command Evidence",
+        "",
+    ]
+    if commands:
+        for command in commands:
+            command_id = command.get("command_id", command.get("command", "unknown"))
+            lines.append(f"- `{command_id}` return code {command.get('returncode')} log: `{command.get('log_path', '')}`")
+    else:
+        lines.append("- No command evidence recorded yet. Run registered commands through `command_engine.py` when possible.")
+    lines += [
+        "",
+        "## Runtime Evidence",
+        "",
+        *_markdown_list(runtime_evidence, "No runtime evidence recorded yet."),
+        "",
+        "## Verification Status",
+        "",
+        *_markdown_list(verification_status, "No requirement-level verification status recorded yet."),
+        "",
+        "## Evidence Rules",
+        "",
+        "- Treat this manifest as the request-local index for logs, screenshots, traces, reviews, waivers, and command outputs.",
+        "- Preserve raw command logs under `evidence/commands/` and reference them from `state.json` and `verification-report.md`.",
+        "- Do not claim completion until every required acceptance criterion has direct evidence or an explicit waiver.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def render_prompt_packet(target: str | Path, request_id: str, phase: str, state: dict[str, Any] | None = None) -> str:
+    normalized = phase.strip().lower()
+    if normalized not in PROMPT_PHASE_INSTRUCTIONS:
+        raise HarnessError(f"Unknown prompt packet phase: {phase}")
+    state = state or load_state(target, request_id)
+    instruction = PROMPT_PHASE_INSTRUCTIONS[normalized]
+    return f"""# Prompt Packet: {normalized}
+
+Generated: {now_iso()}
+Request ID: {request_id}
+Current phase: {state.get('phase')}
+Objective: {state.get('objective')}
+
+## Required Instruction
+
+{instruction}
+
+## Durable Artifacts
+
+- Intake: `{intake_path(target, request_id)}`
+- Spec: `{spec_path(target, request_id)}`
+- Plan: `{plan_path(target, request_id)}`
+- Tasks: `{tasks_path(target, request_id)}`
+- State: `{request_dir(target, request_id) / 'state.json'}`
+- History: `{history_path(target, request_id)}`
+- Evidence manifest: `{evidence_manifest_path(target, request_id)}`
+- Continuation handoff: `{continuation_handoff_path(target, request_id)}`
+
+## Gating Rule
+
+Do not approve `spec.md` or enter PLAN until intake is complete. Do not advance later phases without validating and approving the current gate in `state.json`. Keep evidence and handoff artifacts current when commands, decisions, risks, or next actions change.
+"""
+
+
+def _recent_completed_events(events: list[dict[str, Any]]) -> list[str]:
+    interesting = {
+        "approval.recorded",
+        "command.run",
+        "intake.completed",
+        "plan.created",
+        "request.created",
+        "spec.created",
+        "state.transition",
+        "tasks.created",
+        "verification.rendered",
+    }
+    completed = [event.get("summary", "") for event in events if event.get("type") in interesting and event.get("summary")]
+    return completed[-10:]
+
+
+def render_handoff_packet(
+    target: str | Path,
+    request_id: str,
+    specialist: str = "continuation",
+    completed: list[str] | None = None,
+    pending: list[str] | None = None,
+    risks: list[str] | None = None,
+    next_action: str = "",
+    state: dict[str, Any] | None = None,
+) -> str:
+    state = state or load_state(target, request_id)
+    events = read_jsonl(history_path(target, request_id))
+    risk_level = state.get("risk_level", {})
+    residual_risks = list(state.get("residual_risks", []))
+    if isinstance(risk_level, dict) and risk_level.get("level") not in {"", "unknown", None}:
+        residual_risks.append(f"{risk_level.get('level')}: {risk_level.get('reason', '')}".strip())
+    completed_items = completed or _recent_completed_events(events)
+    pending_items = pending or [next_action or state.get("next_action", "Continue workflow.")]
+    risk_items = risks or residual_risks
+    decisions = list(state.get("decisions", []))
+    decisions += [event for event in events if "decision" in event.get("type", "")]
+    lines = [
+        f"# Handoff: {specialist}",
+        "",
+        f"Generated: {now_iso()}",
+        f"Request ID: {request_id}",
+        f"Objective: {state.get('objective')}",
+        f"Current phase: {state.get('phase')}",
+        f"Status: {state.get('status')}",
+        "",
+        "## Completed",
+        *_markdown_list(completed_items, "No completed work recorded yet."),
+        "",
+        "## Pending",
+        *_markdown_list(pending_items, "No pending work recorded."),
+        "",
+        "## Changed Files",
+        *_markdown_list(state.get("changed_files", []), "No changed files recorded yet."),
+        "",
+        "## Commands Run",
+        *_markdown_list(state.get("commands_run", []), "No commands recorded yet."),
+        "",
+        "## Decisions",
+        *_markdown_list(decisions, "No decisions recorded yet."),
+        "",
+        "## Assumptions",
+        *_markdown_list(state.get("assumptions", []), "No assumptions recorded yet."),
+        "",
+        "## Risks",
+        *_markdown_list(risk_items, "No residual risks recorded yet."),
+        "",
+        "## Next Action",
+        next_action or state.get("next_action", ""),
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def required_artifact_paths(target: str | Path, request_id: str) -> dict[str, Any]:
+    return {
+        "evidence_manifest": evidence_manifest_path(target, request_id),
+        "prompt_packets": {phase: prompt_packet_path(target, request_id, phase) for phase in PROMPT_PHASES},
+        "continuation_handoff": continuation_handoff_path(target, request_id),
+    }
+
+
+def missing_required_artifacts(target: str | Path, request_id: str) -> list[str]:
+    artifacts = required_artifact_paths(target, request_id)
+    paths = [artifacts["evidence_manifest"], artifacts["continuation_handoff"]]
+    paths.extend(artifacts["prompt_packets"].values())
+    return [str(path) for path in paths if not path.exists()]
+
+
+def sync_required_request_artifacts(
+    target: str | Path,
+    request_id: str,
+    force: bool = False,
+    event_type: str = "request.artifacts.generated",
+) -> dict[str, Any]:
+    ensure_request_dirs(target, request_id)
+    state = load_state(target, request_id)
+    artifacts = ensure_artifacts_state(state)
+    written: list[str] = []
+
+    evidence_path = evidence_manifest_path(target, request_id)
+    if write_if_absent(evidence_path, render_evidence_manifest(state), force=force):
+        written.append(str(evidence_path))
+
+    prompt_paths: dict[str, str] = {}
+    for phase in PROMPT_PHASES:
+        path = prompt_packet_path(target, request_id, phase)
+        prompt_paths[phase] = str(path)
+        if write_if_absent(path, render_prompt_packet(target, request_id, phase, state=state), force=force):
+            written.append(str(path))
+
+    handoff = continuation_handoff_path(target, request_id)
+    if write_if_absent(handoff, render_handoff_packet(target, request_id, state=state), force=force):
+        written.append(str(handoff))
+
+    artifacts["evidence_manifest"] = str(evidence_path)
+    artifacts["prompt_packets"] = prompt_paths
+    artifacts["continuation_handoff"] = str(handoff)
+    artifacts["last_synced_at"] = now_iso()
+    save_state(target, request_id, state)
+
+    if written:
+        append_history(target, request_id, event_type, "Generated required request artifacts", paths=written)
+
+    return {
+        "request_id": request_id,
+        "written": written,
+        "artifacts": {
+            "evidence_manifest": str(evidence_path),
+            "prompt_packets": prompt_paths,
+            "continuation_handoff": str(handoff),
+        },
+        "missing": missing_required_artifacts(target, request_id),
+    }
+
+
+def refresh_evidence_manifest(target: str | Path, request_id: str, event_type: str = "evidence.manifest.updated") -> Path:
+    ensure_request_dirs(target, request_id)
+    state = load_state(target, request_id)
+    artifacts = ensure_artifacts_state(state)
+    path = evidence_manifest_path(target, request_id)
+    path.write_text(render_evidence_manifest(state), encoding="utf-8")
+    artifacts["evidence_manifest"] = str(path)
+    artifacts["last_synced_at"] = now_iso()
+    save_state(target, request_id, state)
+    append_history(target, request_id, event_type, "Updated evidence manifest", path=str(path))
+    return path
+
+
+def refresh_continuation_handoff(target: str | Path, request_id: str, event_type: str = "handoff.updated") -> Path:
+    ensure_request_dirs(target, request_id)
+    state = load_state(target, request_id)
+    artifacts = ensure_artifacts_state(state)
+    path = continuation_handoff_path(target, request_id)
+    path.write_text(render_handoff_packet(target, request_id, state=state), encoding="utf-8")
+    artifacts["continuation_handoff"] = str(path)
+    artifacts["last_synced_at"] = now_iso()
+    save_state(target, request_id, state)
+    append_history(target, request_id, event_type, "Updated continuation handoff", path=str(path))
+    return path
 
 
 def detect_stack(target: str | Path) -> dict[str, Any]:

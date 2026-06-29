@@ -23,5 +23,6 @@ Tool protocol:
 - Require approval for commands that mutate state, pull images, use credentials, deploy, publish, access production, or run expensive workflows.
 - Treat tool output as evidence only for what it actually proves.
 - Preserve raw logs in request evidence when useful.
+- Keep `evidence/manifest.md` present for every request and refresh it when command, runtime, review, or verification evidence changes.
 
 MCP tools should be discovered before use and treated with the same purpose, risk, permission, and evidence rules as shell commands.

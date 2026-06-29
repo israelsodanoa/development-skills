@@ -27,8 +27,21 @@ Required layout:
       state.json
       history.jsonl
       handoffs/
+        continuation.md
       prompt-packets/
+        intake.md
+        specify.md
+        plan.md
+        tasks.md
+        implement.md
+        failure.md
+        review.md
+        verify.md
+        improve.md
+        handoff.md
       evidence/
+        manifest.md
+        commands/
       verification-report.md
   reports/
 ```

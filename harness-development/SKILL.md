@@ -44,6 +44,7 @@ Each phase must update `.harness/requests/<request_id>/state.json` and append me
 ## Required Workflow
 
 - Persist `intake.md` first. Use an adaptive interview to capture objective, task type, audience, desired outcome, success criteria, non-goals, constraints, permissions, verification expectations, assumptions, waivers, and blocking open questions.
+- Generate required request artifacts at request creation: `evidence/manifest.md`, phase prompt packets under `prompt-packets/`, and `handoffs/continuation.md`. Workflow validation and phase transitions must backfill these files for older requests, and phase changes or verification updates must refresh the stable continuation handoff.
 - Complete intake before approving `spec.md` or entering PLAN.
 - Persist `spec.md` after intake. Include objective, stack, commands, project structure, code style, testing strategy, boundaries, success criteria, assumptions, and open questions.
 - Validate and approve the spec gate before creating `plan.md`.
@@ -86,7 +87,7 @@ python3 scripts/request_engine.py show --target /path/to/project --request-id <r
 
 Use this before writing a spec for any implementation request. The generated request ID becomes the stable key for every later command.
 
-Outputs: `.harness/requests/<request_id>/state.json`, `intake.md`, `history.jsonl`, `handoffs/`, `prompt-packets/`, and `evidence/`.
+Outputs: `.harness/requests/<request_id>/state.json`, `intake.md`, `history.jsonl`, `evidence/manifest.md`, `prompt-packets/*.md`, `handoffs/continuation.md`, and artifact path metadata in state.
 
 ### `intake_engine.py`
 
@@ -252,7 +253,7 @@ python3 scripts/prompt_engine.py --target /path/to/project --request-id <request
 
 Use prompt packets when handing work to another agent, restarting after compaction, or narrowing context for a specific phase. Available phases: `intake`, `specify`, `plan`, `tasks`, `implement`, `failure`, `review`, `verify`, `improve`, and `handoff`.
 
-Outputs: `.harness/requests/<request_id>/prompt-packets/<phase>.md` when `--write` is used.
+Outputs: `.harness/requests/<request_id>/prompt-packets/<phase>.md` when `--write` is used, plus a `prompt_packet.generated` history event.
 
 ### `handoff_engine.py`
 
@@ -267,7 +268,7 @@ python3 scripts/handoff_engine.py --target /path/to/project --request-id <reques
 
 Use it before context reset, user interruption, cross-agent review, or specialist delegation. Supported specialists: `architecture`, `security`, `test`, `ui`, `product`, `release`, and `continuation`.
 
-Outputs: `.harness/requests/<request_id>/handoffs/*.md` and handoff history events.
+Outputs: `.harness/requests/<request_id>/handoffs/*.md` and handoff history events. Request creation also maintains a stable `.harness/requests/<request_id>/handoffs/continuation.md` resume packet.
 
 ### `verification_engine.py`
 

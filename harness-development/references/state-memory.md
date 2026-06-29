@@ -13,11 +13,14 @@ Required state fields:
 - `context_sources`, `inspected_files`, `changed_files`
 - `decisions`, `assumptions`, `open_questions`
 - `commands_run`, `verification_status`, `failure_attributions`, `interventions`
+- `artifacts.evidence_manifest`, `artifacts.prompt_packets`, `artifacts.continuation_handoff`, `artifacts.last_synced_at`
 - `next_action`, `created_at`, `updated_at`
 
 Project memory is durable and lives under `.harness/memory/`.
 
 Request intake lives in `.harness/requests/<request_id>/intake.md` and `state.json`. Request creation starts as a draft; the agent then asks adaptive interview questions. Planning stays blocked until required intake fields are answered or explicitly waived and `intake.status` is `complete`.
+
+Required request artifacts live beside the state file. `evidence/manifest.md` indexes acceptance, command, runtime, review, and waiver evidence. `prompt-packets/*.md` stores phase-specific restart prompts. `handoffs/continuation.md` stores stable resume state and is refreshed after phase changes, command evidence, and verification updates. Validation and phase transitions must backfill missing required artifacts so older requests do not stay incomplete.
 
 Plan and task quality evidence lives in `state.json` under `planning_quality`. It records whether the strict plan and task gates have passed, which planning frameworks were represented, the required XS/S task size floor, validation timestamps, and task count. Top-level `decisions`, `assumptions`, `open_questions`, `risk_level`, and `verification_status` remain the authoritative implementation state.
 

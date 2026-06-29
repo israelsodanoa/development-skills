@@ -17,6 +17,8 @@ Required phases:
 
 Every prompt packet should name the request ID, current phase, objective, relevant artifact paths, required output, and gating rule.
 
+Request creation generates prompt packets for all required phases under `.harness/requests/<request_id>/prompt-packets/`. Workflow validation and phase transitions backfill missing packets for older requests. Explicit `prompt_engine.py --write` calls may refresh an individual packet and must record a history event.
+
 The intake prompt asks a common first batch covering objective, task type, audience, desired outcome, success criteria, non-goals, constraints, permissions, and verification expectations. It then asks type-specific follow-ups for feature, bug, refactor, UI/runtime, security/reliability, review, maintenance, or harness-improvement work, plus risk follow-ups for migrations, external systems, credentials, destructive actions, production impact, or ambiguous product behavior. Do not approve `spec.md` or enter PLAN until intake is complete.
 
 The plan prompt must require WBS, INVEST, SMART, ADR, RAPID, Cynefin, Gherkin, and premortem framework coverage. The tasks prompt must require lowest-practical decomposition and reject placeholder, M/L/XL, multi-subsystem, or vague tasks before approval.

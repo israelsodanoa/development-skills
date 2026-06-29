@@ -16,6 +16,8 @@ from harness_common import (
     main_guard,
     now_iso,
     print_json,
+    refresh_continuation_handoff,
+    refresh_evidence_manifest,
     request_dir,
     run_shell,
     save_state,
@@ -63,6 +65,8 @@ def run_command(args: argparse.Namespace) -> None:
         state["next_action"] = "Review command result and continue workflow."
         save_state(root, args.request_id, state)
         append_history(root, args.request_id, "command.run", f"Ran {args.id}", **payload)
+        refresh_evidence_manifest(root, args.request_id)
+        refresh_continuation_handoff(root, args.request_id)
     print_json({"ok": result.returncode == 0, **payload})
     if result.returncode != 0:
         raise SystemExit(result.returncode)
