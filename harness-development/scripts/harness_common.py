@@ -83,6 +83,13 @@ MEMORY_BACKENDS = [
     ".harness/memory/control-gaps.json",
 ]
 
+CONTEXT_TOKEN_ESTIMATOR = "approx_chars_div_4"
+CONTEXT_PRIORITY_LEVELS = ["critical", "high", "medium", "low"]
+CONTEXT_INCLUSION_MODES = ["path", "summary", "excerpt", "full"]
+CONTEXT_PLACEMENTS = ["stable-prefix", "task-context", "final-instructions", "reference-only"]
+CONTEXT_CACHE_SCOPES = ["stable", "volatile", "none"]
+CONTEXT_LEDGER_DISPLAY_LIMIT = 8
+
 PLACEHOLDER_PATTERNS = [
     r"\bplaceholder\b",
     r"\breplace\b",
@@ -205,6 +212,12 @@ MEMORY_GUARDRAILS = """1. Before action, retrieve relevant memory and record sel
 3. After meaningful evidence, record reflections with `memory_engine.py reflect` before changing durable project memory.
 4. Promote only evidence-backed semantic or procedural knowledge with `memory_engine.py promote`.
 5. Record stale, misleading, or superseded memory with `memory_engine.py prune`; do not silently delete user-edited memory."""
+
+CONTEXT_ECONOMY_RULES = """1. Load the smallest evidence-bearing context that can answer the phase goal; prefer paths and summaries before excerpts or full files.
+2. Record selected and skipped sources with priority, inclusion mode, placement, cache scope, and approximate token estimate.
+3. Put stable reusable instructions and source summaries before volatile request details when building prompts.
+4. Keep raw logs, large docs, and broad searches out of the prompt; link artifacts and summarize the inspected result.
+5. When selected context exceeds the target budget or approaches the compression trigger, compact into `handoffs/continuation.md`, split work, or retrieve narrower sources."""
 
 
 class HarnessError(RuntimeError):
@@ -444,6 +457,39 @@ def default_planning_quality() -> dict[str, Any]:
     }
 
 
+def default_context_budget() -> dict[str, Any]:
+    return {
+        "max_input_tokens": 128000,
+        "target_input_tokens": 24000,
+        "reserved_output_tokens": 4000,
+        "compression_trigger_tokens": 96000,
+        "current_selected_tokens": 0,
+        "status": "within_budget",
+        "estimator": CONTEXT_TOKEN_ESTIMATOR,
+        "last_audited_at": "",
+    }
+
+
+def default_context_ledger() -> dict[str, Any]:
+    return {
+        "selected": [],
+        "skipped": [],
+        "last_updated_at": "",
+    }
+
+
+def default_context_policy() -> dict[str, Any]:
+    return {
+        "prefer_paths_and_summaries": True,
+        "record_token_estimates": True,
+        "stable_prefix_first": True,
+        "avoid_raw_large_artifacts": True,
+        "compact_when_over_target": True,
+        "split_when_over_compression_trigger": True,
+        "max_prompt_ledger_items": CONTEXT_LEDGER_DISPLAY_LIMIT,
+    }
+
+
 def default_memory_state() -> dict[str, Any]:
     return {
         "working": {
@@ -451,6 +497,8 @@ def default_memory_state() -> dict[str, Any]:
             "skipped_sources": [],
             "active_notes": [],
             "last_retrieved_at": "",
+            "context_budget": default_context_budget(),
+            "context_ledger": default_context_ledger(),
         },
         "episodic": {
             "history_path": "history.jsonl",
@@ -465,6 +513,7 @@ def default_memory_state() -> dict[str, Any]:
             "promotion_requires_evidence": True,
             "prune_requires_reason": True,
             "allowed_backends": list(MEMORY_BACKENDS),
+            "context_economy": default_context_policy(),
         },
     }
 
@@ -478,6 +527,17 @@ def default_artifacts_state() -> dict[str, Any]:
     }
 
 
+def merge_defaults(existing: Any, default: Any) -> Any:
+    if isinstance(default, dict):
+        result = existing if isinstance(existing, dict) else {}
+        for key, value in default.items():
+            result[key] = merge_defaults(result.get(key), value)
+        return result
+    if isinstance(default, list):
+        return existing if isinstance(existing, list) else list(default)
+    return default if existing is None or existing == "" else existing
+
+
 def ensure_memory_state(state: dict[str, Any]) -> dict[str, Any]:
     memory = state.get("memory")
     if not isinstance(memory, dict):
@@ -486,16 +546,9 @@ def ensure_memory_state(state: dict[str, Any]) -> dict[str, Any]:
     for section, section_default in default.items():
         existing = memory.get(section)
         if not isinstance(existing, dict):
-            memory[section] = dict(section_default)
+            memory[section] = merge_defaults({}, section_default)
             continue
-        for key, value in section_default.items():
-            if isinstance(value, list):
-                existing.setdefault(key, [])
-            elif isinstance(value, dict):
-                current = existing.get(key)
-                existing[key] = current if isinstance(current, dict) else dict(value)
-            else:
-                existing.setdefault(key, value)
+        memory[section] = merge_defaults(existing, section_default)
     state["memory"] = memory
     return memory
 
@@ -860,6 +913,124 @@ def _markdown_list(items: Iterable[Any], default: str = "None recorded.") -> lis
     return lines or [f"- {default}"]
 
 
+def estimate_text_tokens(text: str) -> int:
+    if not text:
+        return 0
+    return max(1, (len(text) + 3) // 4)
+
+
+def estimate_context_tokens(target: str | Path, source: str, explicit_estimate: int | None = None) -> dict[str, Any]:
+    if explicit_estimate and explicit_estimate > 0:
+        return {"token_estimate": explicit_estimate, "token_estimate_source": "manual"}
+    if "://" in source:
+        return {"token_estimate": 0, "token_estimate_source": "unknown_remote"}
+    source_path = Path(source).expanduser()
+    if not source_path.is_absolute():
+        source_path = target_root(target) / source
+    if not source_path.exists() or not source_path.is_file():
+        return {"token_estimate": 0, "token_estimate_source": "unknown"}
+    try:
+        text = source_path.read_text(encoding="utf-8")
+        return {"token_estimate": estimate_text_tokens(text), "token_estimate_source": CONTEXT_TOKEN_ESTIMATOR}
+    except UnicodeDecodeError:
+        try:
+            size = source_path.stat().st_size
+        except OSError:
+            return {"token_estimate": 0, "token_estimate_source": "unknown"}
+        return {"token_estimate": max(1, (size + 3) // 4), "token_estimate_source": "file_size_div_4"}
+    except OSError:
+        return {"token_estimate": 0, "token_estimate_source": "unknown"}
+
+
+def update_context_ledger(state: dict[str, Any], record: dict[str, Any]) -> None:
+    memory = ensure_memory_state(state)
+    working = memory.setdefault("working", {})
+    ledger = working.setdefault("context_ledger", default_context_ledger())
+    bucket = "selected" if record.get("status") == "selected" else "skipped"
+    entry = {
+        "source": record.get("source", ""),
+        "reason": record.get("reason", ""),
+        "summary": record.get("summary", ""),
+        "memory_type": record.get("memory_type", "unknown"),
+        "priority": record.get("priority", "medium"),
+        "inclusion": record.get("inclusion", "summary"),
+        "placement": record.get("placement", "task-context"),
+        "cache_scope": record.get("cache_scope", "volatile"),
+        "token_estimate": int(record.get("token_estimate") or 0),
+        "token_estimate_source": record.get("token_estimate_source", "unknown"),
+        "recorded_at": record.get("retrieved_at") or now_iso(),
+    }
+    ledger.setdefault(bucket, []).append(entry)
+    ledger.setdefault("selected", [])
+    ledger.setdefault("skipped", [])
+    ledger["last_updated_at"] = now_iso()
+
+    budget = working.setdefault("context_budget", default_context_budget())
+    selected_total = sum(int(item.get("token_estimate") or 0) for item in ledger.get("selected", []))
+    budget["current_selected_tokens"] = selected_total
+    trigger = int(budget.get("compression_trigger_tokens") or 0)
+    target = int(budget.get("target_input_tokens") or 0)
+    if trigger and selected_total >= trigger:
+        budget["status"] = "compression_recommended"
+    elif target and selected_total > target:
+        budget["status"] = "above_target"
+    else:
+        budget["status"] = "within_budget"
+    budget["last_audited_at"] = now_iso()
+
+
+def _context_record_line(item: dict[str, Any]) -> str:
+    source = item.get("source", "unknown")
+    tokens = item.get("token_estimate", 0)
+    priority = item.get("priority", "medium")
+    inclusion = item.get("inclusion", "summary")
+    placement = item.get("placement", "task-context")
+    cache_scope = item.get("cache_scope", "volatile")
+    summary = item.get("summary") or item.get("reason", "")
+    details = f"{tokens} tokens est; priority {priority}; {inclusion}; {placement}; cache {cache_scope}"
+    if summary:
+        details += f"; {summary}"
+    return f"- `{source}` ({details})"
+
+
+def _context_ledger_lines(state: dict[str, Any], bucket: str, default: str) -> list[str]:
+    memory = ensure_memory_state(state)
+    working = memory.setdefault("working", {})
+    policy = memory.setdefault("policy", {}).setdefault("context_economy", default_context_policy())
+    limit = int(policy.get("max_prompt_ledger_items") or CONTEXT_LEDGER_DISPLAY_LIMIT)
+    ledger = working.setdefault("context_ledger", default_context_ledger())
+    items = list(ledger.get(bucket, []))
+    if not items:
+        return [f"- {default}"]
+    visible = items[-limit:]
+    lines = [_context_record_line(item) for item in visible]
+    omitted = len(items) - len(visible)
+    if omitted > 0:
+        lines.append(f"- {omitted} older {bucket} context item(s) omitted from this compact packet.")
+    return lines
+
+
+def context_budget_lines(state: dict[str, Any]) -> list[str]:
+    memory = ensure_memory_state(state)
+    budget = memory.setdefault("working", {}).setdefault("context_budget", default_context_budget())
+    return [
+        f"- Status: {budget.get('status', 'unknown')}",
+        f"- Current selected estimate: {budget.get('current_selected_tokens', 0)} tokens",
+        f"- Target input budget: {budget.get('target_input_tokens', 0)} tokens",
+        f"- Compression trigger: {budget.get('compression_trigger_tokens', 0)} tokens",
+        f"- Reserved output budget: {budget.get('reserved_output_tokens', 0)} tokens",
+        f"- Estimator: {budget.get('estimator', CONTEXT_TOKEN_ESTIMATOR)}",
+    ]
+
+
+def selected_context_lines(state: dict[str, Any]) -> list[str]:
+    return _context_ledger_lines(state, "selected", "No selected context recorded yet.")
+
+
+def skipped_context_lines(state: dict[str, Any]) -> list[str]:
+    return _context_ledger_lines(state, "skipped", "No skipped context recorded yet.")
+
+
 def _acceptance_lines(criteria: list[Any]) -> list[str]:
     if not criteria:
         return ["- No acceptance criteria recorded yet."]
@@ -932,17 +1103,44 @@ def render_prompt_packet(target: str | Path, request_id: str, phase: str, state:
     if normalized not in PROMPT_PHASE_INSTRUCTIONS:
         raise HarnessError(f"Unknown prompt packet phase: {phase}")
     state = state or load_state(target, request_id)
+    ensure_memory_state(state)
     instruction = PROMPT_PHASE_INSTRUCTIONS[normalized]
     return f"""# Prompt Packet: {normalized}
+
+## Cache-Stable Contract
+
+Phase packet: `{normalized}`
+
+Required instruction:
+
+{instruction}
+
+## Context Economy Rules
+
+{CONTEXT_ECONOMY_RULES}
+
+## Memory Guardrails
+
+{MEMORY_GUARDRAILS}
+
+## Request Context
 
 Generated: {now_iso()}
 Request ID: {request_id}
 Current phase: {state.get('phase')}
 Objective: {state.get('objective')}
 
-## Required Instruction
+## Context Budget
 
-{instruction}
+{chr(10).join(context_budget_lines(state))}
+
+## Selected Context
+
+{chr(10).join(selected_context_lines(state))}
+
+## Skipped Context
+
+{chr(10).join(skipped_context_lines(state))}
 
 ## Durable Artifacts
 
@@ -958,13 +1156,13 @@ Objective: {state.get('objective')}
 - Evidence manifest: `{evidence_manifest_path(target, request_id)}`
 - Continuation handoff: `{continuation_handoff_path(target, request_id)}`
 
-## Memory Guardrails
-
-{MEMORY_GUARDRAILS}
-
 ## Gating Rule
 
 Do not approve `spec.md` or enter PLAN until intake is complete. Do not advance later phases without validating and approving the current gate in `state.json`. Keep evidence and handoff artifacts current when commands, decisions, risks, or next actions change.
+
+## Immediate Next Action
+
+Execute only the `{normalized}` phase goal above. Keep retrieved context within budget, cite artifact paths instead of pasting large files, and update state/history when context, evidence, risks, or next actions change.
 """
 
 
@@ -995,6 +1193,7 @@ def render_handoff_packet(
     state: dict[str, Any] | None = None,
 ) -> str:
     state = state or load_state(target, request_id)
+    ensure_memory_state(state)
     events = read_jsonl(history_path(target, request_id))
     risk_level = state.get("risk_level", {})
     residual_risks = list(state.get("residual_risks", []))
@@ -1019,6 +1218,12 @@ def render_handoff_packet(
         "",
         "## Pending",
         *_markdown_list(pending_items, "No pending work recorded."),
+        "",
+        "## Context Budget",
+        *context_budget_lines(state),
+        "",
+        "## Selected Context",
+        *selected_context_lines(state),
         "",
         "## Changed Files",
         *_markdown_list(state.get("changed_files", []), "No changed files recorded yet."),

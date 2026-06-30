@@ -6,9 +6,14 @@ from __future__ import annotations
 import argparse
 
 from harness_common import (
+    CONTEXT_CACHE_SCOPES,
+    CONTEXT_INCLUSION_MODES,
+    CONTEXT_PLACEMENTS,
+    CONTEXT_PRIORITY_LEVELS,
     HarnessError,
     append_history,
     ensure_memory_state,
+    estimate_context_tokens,
     harness_dir,
     load_json,
     load_state,
@@ -17,6 +22,7 @@ from harness_common import (
     parse_json_arg,
     print_json,
     save_state,
+    update_context_ledger,
     write_json,
 )
 
@@ -57,11 +63,19 @@ def save_request_memory(target: str, request_id: str, state: dict, event_type: s
 def retrieve(args: argparse.Namespace) -> None:
     state, memory = load_request_memory(args.target, args.request_id)
     stamp = now_iso()
+    estimate = estimate_context_tokens(args.target, args.source, args.token_estimate)
     record = {
         "source": args.source,
         "reason": args.reason,
+        "summary": args.summary,
         "memory_type": args.memory_type,
         "status": args.status,
+        "priority": args.priority,
+        "inclusion": args.inclusion,
+        "placement": args.placement,
+        "cache_scope": args.cache_scope,
+        "token_estimate": estimate["token_estimate"],
+        "token_estimate_source": estimate["token_estimate_source"],
         "retrieved_at": stamp,
     }
     working = memory.setdefault("working", {})
@@ -71,13 +85,21 @@ def retrieve(args: argparse.Namespace) -> None:
             {
                 "path": args.source,
                 "reason": args.reason,
+                "summary": args.summary,
                 "memory_type": args.memory_type,
+                "priority": args.priority,
+                "inclusion": args.inclusion,
+                "placement": args.placement,
+                "cache_scope": args.cache_scope,
+                "token_estimate": estimate["token_estimate"],
+                "token_estimate_source": estimate["token_estimate_source"],
                 "selected_at": stamp,
             }
         )
     else:
         working.setdefault("skipped_sources", []).append(record)
     working["last_retrieved_at"] = stamp
+    update_context_ledger(state, record)
     save_request_memory(
         args.target,
         args.request_id,
@@ -87,6 +109,12 @@ def retrieve(args: argparse.Namespace) -> None:
         source=args.source,
         reason=args.reason,
         memory_type=args.memory_type,
+        priority=args.priority,
+        inclusion=args.inclusion,
+        placement=args.placement,
+        cache_scope=args.cache_scope,
+        token_estimate=estimate["token_estimate"],
+        token_estimate_source=estimate["token_estimate_source"],
     )
     print_json(record)
 
@@ -317,6 +345,12 @@ def run() -> None:
     retrieve_parser.add_argument("--reason", required=True)
     retrieve_parser.add_argument("--status", choices=["selected", "skipped"], default="selected")
     retrieve_parser.add_argument("--memory-type", choices=["working", "episodic", "semantic", "procedural", "unknown"], default="semantic")
+    retrieve_parser.add_argument("--priority", choices=CONTEXT_PRIORITY_LEVELS, default="medium")
+    retrieve_parser.add_argument("--inclusion", choices=CONTEXT_INCLUSION_MODES, default="summary")
+    retrieve_parser.add_argument("--placement", choices=CONTEXT_PLACEMENTS, default="task-context")
+    retrieve_parser.add_argument("--cache-scope", choices=CONTEXT_CACHE_SCOPES, default="volatile")
+    retrieve_parser.add_argument("--summary", default="")
+    retrieve_parser.add_argument("--token-estimate", type=int, default=0)
     retrieve_parser.set_defaults(func=retrieve)
     reflect_parser = sub.add_parser("reflect")
     reflect_parser.add_argument("--target", default=".")

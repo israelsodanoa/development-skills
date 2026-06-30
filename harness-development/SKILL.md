@@ -46,6 +46,7 @@ Each phase must update `.harness/requests/<request_id>/state.json` and append me
 - Persist `intake.md` first. Use an adaptive interview to capture objective, task type, audience, desired outcome, success criteria, non-goals, constraints, permissions, verification expectations, assumptions, waivers, and blocking open questions.
 - Generate required request artifacts at request creation: `evidence/manifest.md`, phase prompt packets under `prompt-packets/`, and `handoffs/continuation.md`. Workflow validation and phase transitions must backfill these files for older requests, and phase changes or verification updates must refresh the stable continuation handoff.
 - Run the memory lifecycle in every phase: retrieve relevant working/semantic/procedural memory before action, record selected and skipped sources, reflect after evidence, promote only evidence-backed durable knowledge, and prune stale or superseded memory by recording the reason.
+- Treat context as a budgeted resource: record selected and skipped sources with priority, inclusion mode, placement, cache scope, summary, and token estimate; prefer path-plus-summary context; compact or split work when selected context exceeds the target budget or approaches the compression trigger.
 - Complete intake before approving `spec.md` or entering PLAN.
 - Persist `spec.md` after intake. Include objective, stack, commands, project structure, code style, testing strategy, boundaries, success criteria, assumptions, and open questions.
 - Validate and approve the spec gate before creating `plan.md`.
@@ -201,12 +202,13 @@ python3 scripts/memory_engine.py add-source --target /path/to/project --section 
 python3 scripts/memory_engine.py add-gap --target /path/to/project --type command-registry --summary "No integration test command registered"
 python3 scripts/memory_engine.py add-known-failure --target /path/to/project --summary "Agents repeatedly edit the wrong service layer"
 python3 scripts/memory_engine.py retrieve --target /path/to/project --request-id <request_id> --source .harness/memory/memory-index.json --reason "Project map for affected module"
+python3 scripts/memory_engine.py retrieve --target /path/to/project --request-id <request_id> --source references/state-memory.md --reason "Memory contract" --priority high --inclusion summary --placement stable-prefix --cache-scope stable --summary "Budget and ledger rules"
 python3 scripts/memory_engine.py reflect --target /path/to/project --request-id <request_id> --summary "The nearest unit test caught the regression" --lesson-type procedural --evidence "test.unit log"
 python3 scripts/memory_engine.py promote --target /path/to/project --request-id <request_id> --kind semantic --section testing --summary "Use pytest marker X for service tests" --source tests/README.md --evidence "passing test.unit"
 python3 scripts/memory_engine.py prune --target /path/to/project --request-id <request_id> --artifact index --entry-id testing:old-note --reason "Superseded by current test guide"
 ```
 
-Use it when context, controls, or durable project knowledge change. Use `retrieve` before implementation, `reflect` after evidence or failures, `promote` only for evidence-backed semantic/procedural memory, and `prune` to record stale or superseded memory without silently deleting user-edited artifacts. Record repeated failures as known failures or control gaps before closeout.
+Use it when context, controls, or durable project knowledge change. Use `retrieve` before implementation, `reflect` after evidence or failures, `promote` only for evidence-backed semantic/procedural memory, and `prune` to record stale or superseded memory without silently deleting user-edited artifacts. Retrieval accepts optional context-economy metadata: `--priority`, `--inclusion`, `--placement`, `--cache-scope`, `--summary`, and `--token-estimate`. Record repeated failures as known failures or control gaps before closeout.
 
 Outputs: request `state.json` memory fields, request `history.jsonl` memory events, `.harness/memory/memory-index.json`, `known-failures.json`, and `control-gaps.json`.
 

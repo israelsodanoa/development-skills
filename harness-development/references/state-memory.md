@@ -10,9 +10,11 @@ Required state fields:
 - `planning_quality.plan.status`, `planning_quality.plan.frameworks`, `planning_quality.plan.validated_at`
 - `planning_quality.tasks.status`, `planning_quality.tasks.minimum_size`, `planning_quality.tasks.validated_at`, `planning_quality.tasks.task_count`
 - `memory.working.retrieved_sources`, `memory.working.skipped_sources`, `memory.working.active_notes`, `memory.working.last_retrieved_at`
+- `memory.working.context_budget.max_input_tokens`, `target_input_tokens`, `reserved_output_tokens`, `compression_trigger_tokens`, `current_selected_tokens`, `status`, `estimator`, `last_audited_at`
+- `memory.working.context_ledger.selected`, `memory.working.context_ledger.skipped`, `memory.working.context_ledger.last_updated_at`
 - `memory.episodic.history_path`, `memory.episodic.reflections`
 - `memory.long_term.promotions`, `memory.long_term.pruning_log`
-- `memory.policy.retrieve_before_action`, `memory.policy.promotion_requires_evidence`, `memory.policy.prune_requires_reason`
+- `memory.policy.retrieve_before_action`, `memory.policy.promotion_requires_evidence`, `memory.policy.prune_requires_reason`, `memory.policy.context_economy`
 - `acceptance_criteria`, `non_goals`, `risk_level`, `permissions`
 - `context_sources`, `inspected_files`, `changed_files`
 - `decisions`, `assumptions`, `open_questions`
@@ -43,16 +45,26 @@ Memory artifacts:
 
 Memory lifecycle:
 
-1. Retrieve: before acting in a phase, select relevant semantic/procedural memory and record selected and skipped sources with `memory_engine.py retrieve`.
+1. Retrieve: before acting in a phase, select relevant semantic/procedural memory and record selected and skipped sources with `memory_engine.py retrieve`. Include priority, inclusion mode, placement, cache scope, summary, and token estimate whenever a source may enter the prompt.
 2. Apply: use selected memory as feedforward control, then update working memory fields when files, assumptions, risks, or next actions change.
 3. Reflect: after evidence, failures, reviews, or important decisions, record the lesson with `memory_engine.py reflect`.
 4. Promote: move only evidence-backed facts or controls into long-term semantic/procedural memory with `memory_engine.py promote`.
 5. Prune: record stale, misleading, superseded, or low-confidence memory with `memory_engine.py prune`; do not silently delete user-edited memory.
+
+Context economy:
+
+1. Start from the context budget in request working memory. `target_input_tokens` is the normal operating budget; `compression_trigger_tokens` is the compression trigger and means summarize, split, or hand off before adding more raw context.
+2. Prefer path-plus-summary context. Use `--inclusion path` or `--inclusion summary` for most docs, logs, and large files; reserve `excerpt` or `full` for exact code or text needed by the current phase.
+3. Rank sources by priority. Critical/high sources may appear in prompt packets; medium/low sources should usually remain as artifact paths or skipped ledger entries.
+4. Place stable reusable instructions and durable summaries in `stable-prefix`; volatile request facts go in `task-context`; critical final constraints may be repeated in `final-instructions`; background references stay `reference-only`.
+5. Record token estimates. The built-in estimator is approximate and provider-neutral; exact tokenizer/billing numbers are outside this harness.
+6. When budget status becomes `above_target` or `compression_recommended`, update `handoffs/continuation.md` with a compact summary, prune or skip low-priority sources, or split the task before continuing.
 
 Context selection:
 
 1. Identify task category and affected modules.
 2. Load the compact memory index.
 3. Search concrete local files and examples.
-4. Record selected and skipped sources with reasons.
+4. Record selected and skipped sources with reasons, priority, inclusion, placement, cache scope, summary, and token estimate.
 5. Mark missing or stale context as a gap.
+6. Keep large artifacts out of the prompt unless exact content is required; cite paths and compact summaries instead.

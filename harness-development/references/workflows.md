@@ -7,11 +7,11 @@
 3. Intake completion: mark intake complete only when required fields are answered or explicitly waived.
 4. Harness scan: inspect `.harness/`, command registry, project docs, tests, known failures, and control gaps.
 5. Memory retrieval: load only relevant working, semantic, and procedural memory; record selected and skipped sources with `memory_engine.py retrieve`.
-6. Context selection: inspect concrete docs, files, and examples; update request working memory with selected context, assumptions, and stale-memory gaps.
+6. Context selection: inspect concrete docs, files, and examples; update request working memory with selected context, assumptions, and stale-memory gaps. Record context priority, inclusion mode, placement, cache scope, summary, and token estimate for every source that may affect the prompt.
 7. Specify: persist `spec.md` and validate it.
 8. Plan: persist `plan.md` only after completed intake and spec approval. Apply WBS decomposition, dependency graphing, ADR/RAPID decisions, Cynefin complexity classification, verification matrixing, premortem risks, sequencing rationale, and parallelization boundaries; approve only when strict validation passes.
 9. Tasks: persist `tasks.md` only after plan approval. Break work into atomic XS/S tasks with exact scope, non-scope, acceptance, Given/When/Then scenario when applicable, verification evidence, dependencies, likely files, risk notes, rollback/repair, and parallelization label; approve only when strict validation passes.
-10. Implement: make small changes and update state/history after meaningful steps. Refresh evidence artifacts when commands, runtime checks, reviews, or waivers produce proof.
+10. Implement: make small changes and update state/history after meaningful steps. Keep prompt context within the target input budget; prefer path-plus-summary records over raw large artifacts. Refresh evidence artifacts when commands, runtime checks, reviews, or waivers produce proof.
 11. Feedback: run targeted deterministic checks first, then broader checks as risk grows.
 12. Reflection: after evidence, failures, or important decisions, record the lesson with `memory_engine.py reflect`.
 13. Memory promotion or pruning: promote evidence-backed durable facts/controls with `memory_engine.py promote`; record stale or superseded memory with `memory_engine.py prune`.
@@ -19,6 +19,10 @@
 15. Runtime verification: gather browser, API, log, trace, screenshot, or metric evidence when behavior is observable only at runtime.
 16. Review: run self-review and specialist review when deterministic checks are insufficient.
 17. Evidence report: map acceptance criteria to evidence before closeout and keep `evidence/manifest.md` linked to the raw command/runtime/review artifacts.
+
+## Context Compaction
+
+Use the request-local context budget as an active control, not just a report. When selected context exceeds `target_input_tokens`, summarize the current working set, skip low-priority sources, and refresh prompt packets or handoffs. When selected context reaches `compression_trigger_tokens`, stop broad reading and either split the task, create a specialist handoff, or compact the continuation packet before continuing.
 
 ## Specialist Handoffs
 

@@ -70,12 +70,18 @@ class MemoryWorkflowTest(unittest.TestCase):
         self.assertIn("reflections", state["memory"]["episodic"])
         self.assertIn("promotions", state["memory"]["long_term"])
         self.assertTrue(state["memory"]["policy"]["promotion_requires_evidence"])
+        self.assertIn("context_budget", state["memory"]["working"])
+        self.assertIn("context_ledger", state["memory"]["working"])
+        self.assertEqual(state["memory"]["working"]["context_budget"]["estimator"], "approx_chars_div_4")
+        self.assertTrue(state["memory"]["policy"]["context_economy"]["prefer_paths_and_summaries"])
 
         model = index["memory_model"]
         self.assertEqual(model["working_memory"], ".harness/requests/<request_id>/state.json")
         self.assertEqual(model["episodic_memory"], ".harness/requests/<request_id>/history.jsonl")
         self.assertIn("architecture", model["semantic_memory"])
         self.assertIn(".harness/memory/known-failures.json", model["procedural_memory"])
+        self.assertTrue(model["policy"]["context_economy"]["record_token_estimates"])
+        self.assertEqual(index["context_economy"]["default_budget"]["estimator"], "approx_chars_div_4")
         self.assertIsInstance(index["promotion_log"], list)
         self.assertIsInstance(index["pruning_log"], list)
 
@@ -93,6 +99,16 @@ class MemoryWorkflowTest(unittest.TestCase):
             "Project memory before implementation.",
             "--memory-type",
             "semantic",
+            "--priority",
+            "high",
+            "--inclusion",
+            "summary",
+            "--placement",
+            "stable-prefix",
+            "--cache-scope",
+            "stable",
+            "--summary",
+            "Compact project memory map.",
         )
         self.run_script(
             "memory_engine.py",
@@ -189,6 +205,12 @@ class MemoryWorkflowTest(unittest.TestCase):
         self.assertEqual(len(memory["long_term"]["promotions"]), 2)
         self.assertEqual(len(memory["long_term"]["pruning_log"]), 1)
         self.assertEqual(state["context_sources"][0]["path"], ".harness/memory/memory-index.json")
+        self.assertEqual(state["context_sources"][0]["priority"], "high")
+        self.assertGreater(state["context_sources"][0]["token_estimate"], 0)
+        self.assertEqual(memory["working"]["context_ledger"]["selected"][0]["inclusion"], "summary")
+        self.assertEqual(memory["working"]["context_ledger"]["selected"][0]["placement"], "stable-prefix")
+        self.assertEqual(memory["working"]["context_ledger"]["selected"][0]["cache_scope"], "stable")
+        self.assertGreater(memory["working"]["context_budget"]["current_selected_tokens"], 0)
 
         index = self.memory_index()
         self.assertTrue(any(item.get("summary") == "Use file-backed memory lifecycle records." for item in index["decisions"]))
@@ -205,6 +227,24 @@ class MemoryWorkflowTest(unittest.TestCase):
         self.assertIn("memory.pruned", event_types)
 
     def test_prompt_packet_includes_memory_guardrails(self) -> None:
+        self.run_script(
+            "memory_engine.py",
+            "retrieve",
+            "--target",
+            str(self.target),
+            "--request-id",
+            self.request_id,
+            "--source",
+            ".harness/memory/memory-index.json",
+            "--reason",
+            "Prompt packet should expose selected context.",
+            "--memory-type",
+            "semantic",
+            "--priority",
+            "high",
+            "--summary",
+            "Project map.",
+        )
         result = self.run_script(
             "prompt_engine.py",
             "--target",
@@ -216,11 +256,49 @@ class MemoryWorkflowTest(unittest.TestCase):
             "--print",
         )
 
+        self.assertIn("Cache-Stable Contract", result.stdout)
+        self.assertIn("Context Economy Rules", result.stdout)
+        self.assertIn("Context Budget", result.stdout)
+        self.assertIn("Selected Context", result.stdout)
+        self.assertIn(".harness/memory/memory-index.json", result.stdout)
         self.assertIn("Memory Guardrails", result.stdout)
         self.assertIn("memory_engine.py retrieve", result.stdout)
         self.assertIn("memory_engine.py reflect", result.stdout)
         self.assertIn("memory_engine.py promote", result.stdout)
         self.assertIn("memory_engine.py prune", result.stdout)
+
+    def test_continuation_handoff_includes_context_budget(self) -> None:
+        self.run_script(
+            "memory_engine.py",
+            "retrieve",
+            "--target",
+            str(self.target),
+            "--request-id",
+            self.request_id,
+            "--source",
+            ".harness/memory/memory-index.json",
+            "--reason",
+            "Continuation should carry compact selected context.",
+            "--memory-type",
+            "semantic",
+        )
+
+        result = self.run_script(
+            "handoff_engine.py",
+            "--target",
+            str(self.target),
+            "--request-id",
+            self.request_id,
+            "--specialist",
+            "continuation",
+            "--stable",
+        )
+        handoff_path = Path(self.json_output(result)["path"])
+        handoff = handoff_path.read_text(encoding="utf-8")
+
+        self.assertIn("Context Budget", handoff)
+        self.assertIn("Selected Context", handoff)
+        self.assertIn(".harness/memory/memory-index.json", handoff)
 
     def test_references_describe_memory_classes_and_lifecycle(self) -> None:
         state_memory = (ROOT / "references" / "state-memory.md").read_text(encoding="utf-8")
@@ -228,6 +306,10 @@ class MemoryWorkflowTest(unittest.TestCase):
 
         for phrase in ["Working memory", "Episodic memory", "Semantic memory", "Procedural memory", "Memory lifecycle"]:
             self.assertIn(phrase, state_memory)
+        for phrase in ["Context economy", "token estimate", "compression trigger"]:
+            self.assertIn(phrase, state_memory)
+        self.assertIn("stable prefix", prompting)
+        self.assertIn("Context economy rules", prompting)
         self.assertIn("memory_engine.py retrieve", prompting)
         self.assertIn("memory_engine.py promote", prompting)
 

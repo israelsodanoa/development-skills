@@ -19,8 +19,34 @@
     "policy": {
       "retrieve_before_action": true,
       "promotion_requires_evidence": true,
-      "prune_requires_reason": true
+      "prune_requires_reason": true,
+      "context_economy": {
+        "prefer_paths_and_summaries": true,
+        "record_token_estimates": true,
+        "stable_prefix_first": true,
+        "avoid_raw_large_artifacts": true,
+        "compact_when_over_target": true,
+        "split_when_over_compression_trigger": true
+      }
     }
+  },
+  "context_economy": {
+    "default_budget": {
+      "max_input_tokens": 128000,
+      "target_input_tokens": 24000,
+      "reserved_output_tokens": 4000,
+      "compression_trigger_tokens": 96000,
+      "estimator": "approx_chars_div_4"
+    },
+    "source_fields": [
+      "priority",
+      "inclusion",
+      "placement",
+      "cache_scope",
+      "summary",
+      "token_estimate"
+    ],
+    "compaction_rule": "Prefer paths and summaries; compact or split when selected context exceeds the target budget or reaches the compression trigger."
   },
   "project_map": {
     "summary": "",
